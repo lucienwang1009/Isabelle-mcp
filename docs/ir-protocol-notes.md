@@ -160,8 +160,10 @@ construct the TCP payload:
     Ir.step "R" "lemma foo: \"True\"";
 
 Isabelle symbol syntax such as `\<and>` does NOT need extra escaping — only
-the SML string-literal escapes above. Send `\<and>` as the literal seven-character
-sequence `\`, `<`, `a`, `n`, `d`, `>` (plus surrounding quote escapes if needed).
+the SML string-literal escapes above. Send `\<and>` as the literal six-character
+sequence `\`, `<`, `a`, `n`, `d`, `>` — Isabelle's tokenizer parses these ASCII
+characters as its own Unicode symbol names, so they are not a workaround but the
+correct, canonical form inside an SML string literal.
 
 (Source: standard SML escaping; consumed by `Ir.step` at `ir.ML:474–484`.)
 
@@ -272,15 +274,34 @@ Source: `vendor/AutoCorrode/ir/mcp_server.py` (not read in detail; confirmed it 
 
         ● REPL ready. Waiting for connections on 127.0.0.1:<port>
 
-    That line is emitted via `mgmt_output(...)` (which is `print()` to stdout), but the surrounding words are wrapped in ANSI escape codes (`\033[32m`, `\033[0m`, `\033[1m`). The digit sequence itself is unaffected, so this regex works against the raw line:
+    That line is emitted via `mgmt_output(...)` (which is `print()` to stdout). The
+    raw bytes look like:
 
-        r"Waiting for connections on 127\.0\.0\.1:(\d+)"
+        \033[32m● REPL ready.\033[0m Waiting for connections on \033[1m127.0.0.1:9147\033[0m
+
+    Note that `\033[1m` (BOLD) sits **between** `"on "` and `"127.0.0.1:..."`, so
+    a naïve regex will fail. Two correct approaches:
+
+    **Option A — strip ANSI first (recommended):**
+
+    ```python
+    import re
+    ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+    clean = ANSI_RE.sub("", line)
+    m = re.search(r"Waiting for connections on 127\.0\.0\.1:(\d+)", clean)
+    ```
+
+    **Option B — tolerate the optional escape inline:**
+
+    ```python
+    re.search(r"Waiting for connections on (?:\033\[\d+m)?127\.0\.0\.1:(\d+)", line)
+    ```
 
     **The `Tcp_Handler: listening on 127.0.0.1:(\d+)(?: \(token "([^"]*)"\))?` regex is for the *internal* Poly/ML ML_Repl port** — it is consumed by `PolyMLProcess.read_actual_port()` inside `repl.py` itself (`repl.py:621–624`) and is NOT intended for external clients. Do not use it in Task 6's subprocess launcher.
 
     **Recommended mitigation**: pass `--port 9147` (or any chosen fixed port) explicitly to `repl.py`. Then Task 6's launcher never needs to parse the port at all — only the token needs to be captured from stdout (ANSI-free, see 3a above).
 
-4. **Port discovery**: Both the ML_Repl internal port (default 9146) and the repl.py client-facing port (default 9147) are printed to stdout. The client-facing port that Tasks 6–8 need is the one announced as `● REPL ready. Waiting for connections on 127.0.0.1:<port>` (lines 2457–2458). See item 3b above for the correct regex and the recommended `--port` shortcut.
+4. **Port discovery:** See item 3b above.
 
 5. **`Ir.close` does not exist**: The correct teardown command is `Ir.remove "R";`. Or simply close the TCP socket — there is no session-end handshake required.
 
