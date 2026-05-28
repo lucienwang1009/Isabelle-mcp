@@ -59,3 +59,28 @@ def ir_dir(repo_root: Path) -> Path:
             "run git submodule update --init --recursive"
         )
     return path
+
+
+@pytest.fixture(scope="session")
+def hol_built(isabelle_bin: str) -> None:
+    """Skip the test unless `isabelle build -n -b HOL` reports nothing to do.
+
+    A built HOL image is required for I/R to start in reasonable time.
+    Building HOL from scratch takes 5–15 minutes; we never build it
+    inside a test.
+    """
+    import subprocess
+
+    result = subprocess.run(
+        [isabelle_bin, "build", "-n", "-b", "HOL"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        pytest.skip(
+            "HOL session image not built. Run "
+            f"`{isabelle_bin} build -b HOL` "
+            "(takes 5–15 minutes the first time). "
+            f"stderr: {result.stderr.strip()!r}"
+        )

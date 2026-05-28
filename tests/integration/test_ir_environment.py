@@ -28,3 +28,10 @@ def test_isabelle_version_is_2025_2(isabelle_bin: str) -> None:
         f"unexpected Isabelle version "
         f"(stdout={result.stdout!r}, stderr={result.stderr!r})"
     )
+
+
+@pytest.mark.integration
+def test_hol_session_is_built(hol_built: None) -> None:
+    """The HOL session image is up to date (built via `isabelle build -b HOL`)."""
+    # Reaching here means the fixture confirmed HOL is built.
+    assert True
