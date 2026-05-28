@@ -10,6 +10,7 @@ import dataclasses
 import logging
 import os
 import re
+import selectors
 import socket
 import subprocess
 import sys
@@ -37,6 +38,8 @@ class IRDaemonHandle:
     port: int
     auth_token: str
     workdir: Path
+    _stdout_drain: threading.Thread | None = None
+    _stderr_drain: threading.Thread | None = None
 
     def terminate(self, grace_seconds: float = 5.0) -> None:
         """Stop the daemon; SIGTERM first, then SIGKILL after grace."""
@@ -49,6 +52,10 @@ class IRDaemonHandle:
             logger.warning("I/R did not exit on SIGTERM; sending SIGKILL")
             self.process.kill()
             self.process.wait(timeout=grace_seconds)
+        # Join drain threads so any final log lines are flushed before we return.
+        for thread in (self._stdout_drain, self._stderr_drain):
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2.0)
 
 
 def _wait_for_listener(port: int, timeout_seconds: float) -> None:
@@ -70,13 +77,15 @@ def _wait_for_listener(port: int, timeout_seconds: float) -> None:
 
 def _read_token_from_stdout(
     process: subprocess.Popen[str], timeout_seconds: float
-) -> str:
+) -> tuple[str, threading.Thread]:
     """Scan the process's stdout for `IR_Repl.token: <token>`.
 
-    Drains stdout into the logger after the token is found so the pipe
-    never blocks the daemon.
+    Returns (token, drain_thread). The drain_thread continues reading
+    stdout into the logger after the token is captured so the pipe never
+    blocks the daemon. Caller should join the drain thread before
+    process teardown if it needs deterministic log ordering.
 
-    Returns the captured token. Raises TimeoutError if not seen in time.
+    Raises TimeoutError if not seen in time.
     """
     deadline = time.monotonic() + timeout_seconds
     token: str | None = None
@@ -84,21 +93,30 @@ def _read_token_from_stdout(
 
     assert process.stdout is not None, "subprocess must be spawned with stdout=PIPE"
 
-    while time.monotonic() < deadline:
-        # readline() blocks until a newline or EOF; check we're not past deadline often.
-        line = process.stdout.readline()
-        if line == "":
-            # EOF — process exited
-            raise RuntimeError(
-                "I/R subprocess exited before printing the auth token. "
-                f"Captured stdout so far: {''.join(captured_lines)!r}"
-            )
-        captured_lines.append(line)
-        logger.debug("ir stdout: %s", line.rstrip())
-        m = _TOKEN_RE.match(line)
-        if m:
-            token = m.group(1)
-            break
+    sel = selectors.DefaultSelector()
+    sel.register(process.stdout, selectors.EVENT_READ)
+    try:
+        while time.monotonic() < deadline:
+            remaining = max(deadline - time.monotonic(), 0.0)
+            poll_timeout = min(remaining, 1.0)
+            ready = sel.select(timeout=poll_timeout)
+            if not ready:
+                continue  # Loop back to check deadline
+            line = process.stdout.readline()
+            if line == "":
+                # EOF — process exited
+                raise RuntimeError(
+                    "I/R subprocess exited before printing the auth token. "
+                    f"Captured stdout so far: {''.join(captured_lines)!r}"
+                )
+            captured_lines.append(line)
+            logger.debug("ir stdout: %s", line.rstrip())
+            m = _TOKEN_RE.match(line)
+            if m:
+                token = m.group(1)
+                break
+    finally:
+        sel.close()
 
     if token is None:
         raise TimeoutError(
@@ -117,7 +135,24 @@ def _read_token_from_stdout(
 
     drain_thread = threading.Thread(target=_drain, name="ir-stdout-drain", daemon=True)
     drain_thread.start()
-    return token
+    return token, drain_thread
+
+
+def _drain_stderr(process: subprocess.Popen[str]) -> threading.Thread:
+    """Spawn a daemon thread that drains process.stderr into the logger."""
+    assert process.stderr is not None, "subprocess must be spawned with stderr=PIPE"
+
+    def _drain() -> None:
+        try:
+            assert process.stderr is not None
+            for line in process.stderr:
+                logger.debug("ir stderr: %s", line.rstrip())
+        except Exception:
+            pass
+
+    thread = threading.Thread(target=_drain, name="ir-stderr-drain", daemon=True)
+    thread.start()
+    return thread
 
 
 def launch_ir_daemon(
@@ -168,30 +203,42 @@ def launch_ir_daemon(
         cwd=str(ir_dir),
     )
 
+    drain_thread: threading.Thread | None = None
     try:
-        token = _read_token_from_stdout(process, startup_timeout_seconds)
+        token, drain_thread = _read_token_from_stdout(process, startup_timeout_seconds)
         _wait_for_listener(chosen_port, startup_timeout_seconds)
     except Exception:
-        # Capture diagnostic output before tearing down.
+        # Terminate first so all pipes drain to EOF, then collect output.
         try:
-            stderr_tail = ""
+            process.terminate()
+        except OSError:
+            pass
+        # Let the drain thread observe EOF and exit gracefully.
+        if drain_thread is not None:
+            drain_thread.join(timeout=5.0)
+        # Drain remaining stderr only — stdout was owned by drain_thread.
+        stderr_data = ""
+        try:
             if process.stderr is not None:
-                # Non-blocking-ish stderr drain (best effort)
-                process.terminate()
-                try:
-                    _, stderr_data = process.communicate(timeout=3.0)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    _, stderr_data = process.communicate()
-                stderr_tail = stderr_data or ""
-            logger.error("I/R startup failed.\nstderr:\n%s", stderr_tail)
+                stderr_data = process.stderr.read() or ""
         except Exception:
             pass
+        if process.poll() is None:
+            try:
+                process.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3.0)
+        logger.error("I/R startup failed.\nstderr:\n%s", stderr_data)
         raise
+
+    stderr_drain_thread = _drain_stderr(process)
 
     return IRDaemonHandle(
         process=process,
         port=chosen_port,
         auth_token=token,
         workdir=ir_dir,
+        _stdout_drain=drain_thread,
+        _stderr_drain=stderr_drain_thread,
     )

@@ -10,9 +10,12 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+
+from isabelle_mcp.ir_client import IRDaemonHandle, launch_ir_daemon
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +87,6 @@ def hol_built(isabelle_bin: str) -> None:
             "(takes 5–15 minutes the first time). "
             f"stderr: {result.stderr.strip()!r}"
         )
-
-
-from collections.abc import Generator
-
-from isabelle_mcp.ir_client import IRDaemonHandle, launch_ir_daemon
 
 
 @pytest.fixture(scope="session")
