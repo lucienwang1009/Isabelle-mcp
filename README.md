@@ -7,7 +7,7 @@ Status: pre-alpha. See [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.m
 ## Architecture
 
 - Python MCP server wraps [AutoCorrode's I/R](https://github.com/awslabs/AutoCorrode/tree/main/ir) (Isabelle/REPL).
-- I/R is vendored as a git submodule under `vendor/ir/`.
+- I/R is vendored as a git submodule via `vendor/AutoCorrode/`. The actual REPL lives at `vendor/AutoCorrode/ir/`.
 - Layer A (file-anchored), Layer B (REPL/snapshot), Layer C (automation) tool surface.
 - Bundled SKILL guides LLMs through the standard proving loop.
 
