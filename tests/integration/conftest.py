@@ -84,3 +84,29 @@ def hol_built(isabelle_bin: str) -> None:
             "(takes 5–15 minutes the first time). "
             f"stderr: {result.stderr.strip()!r}"
         )
+
+
+from collections.abc import Generator
+
+from isabelle_mcp.ir_client import IRDaemonHandle, launch_ir_daemon
+
+
+@pytest.fixture(scope="session")
+def ir_daemon(
+    isabelle_bin: str, ir_dir: Path, hol_built: None
+) -> Generator[IRDaemonHandle, None, None]:
+    """A long-lived I/R subprocess for the whole test session.
+
+    Starting I/R is slow (~30s after HOL is prebuilt), so this is
+    session-scoped and reused across all tests that need it.
+    """
+    handle = launch_ir_daemon(
+        isabelle_bin=isabelle_bin,
+        ir_dir=ir_dir,
+        session="HOL",
+        startup_timeout_seconds=120.0,
+    )
+    try:
+        yield handle
+    finally:
+        handle.terminate()
