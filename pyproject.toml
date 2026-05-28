@@ -13,7 +13,10 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering",
 ]
-dependencies = []
+dependencies = [
+    "anyio>=4.13.0",
+    "httpx>=0.28.1",
+]
 
 [project.scripts]
 isabelle-mcp = "isabelle_mcp.server:main"
@@ -38,4 +41,10 @@ testpaths = ["tests"]
 markers = [
     "integration: needs a real Isabelle install",
     "heavy: needs ATPs and >60s budget (sledgehammer, etc.)",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.4.0",
 ]
