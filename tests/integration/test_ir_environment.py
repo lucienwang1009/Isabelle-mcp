@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
 
 @pytest.mark.integration
 def test_isabelle_binary_exists(isabelle_bin: str) -> None:
-    """The `isabelle` binary is on PATH or pointed to by ISABELLE_HOME."""
-    assert isabelle_bin, "no isabelle binary located"
+    """The resolved isabelle binary exists on disk and is executable."""
+    p = Path(isabelle_bin)
+    assert p.is_file(), f"{isabelle_bin} is not a file"
+    assert os.access(p, os.X_OK), f"{isabelle_bin} is not executable"
 
 
 @pytest.mark.integration
@@ -19,6 +23,8 @@ def test_isabelle_version_is_2025_2(isabelle_bin: str) -> None:
     result = subprocess.run(
         [isabelle_bin, "version"], capture_output=True, text=True, check=True
     )
-    assert "Isabelle2025-2" in result.stdout, (
-        f"unexpected Isabelle version: {result.stdout!r}"
+    output = result.stdout + result.stderr
+    assert "Isabelle2025-2" in output, (
+        f"unexpected Isabelle version "
+        f"(stdout={result.stdout!r}, stderr={result.stderr!r})"
     )

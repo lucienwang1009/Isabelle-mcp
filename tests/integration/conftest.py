@@ -40,6 +40,7 @@ def isabelle_bin() -> str:
         "isabelle binary not found; export ISABELLE_HOME=<install-root> "
         "or add isabelle to PATH"
     )
+    raise AssertionError("unreachable: pytest.skip raises")
 
 
 @pytest.fixture(scope="session")
@@ -52,9 +53,9 @@ def repo_root() -> Path:
 def ir_dir(repo_root: Path) -> Path:
     """Absolute path to vendored I/R directory."""
     path = repo_root / "vendor" / "AutoCorrode" / "ir"
-    if not (path / "repl.py").is_file():
+    if not (path / "ir.ML").is_file():
         pytest.skip(
-            "vendor/AutoCorrode/ir/repl.py missing; "
+            "vendor/AutoCorrode/ir/ir.ML missing; "
             "run git submodule update --init --recursive"
         )
     return path
