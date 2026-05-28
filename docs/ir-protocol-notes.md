@@ -64,12 +64,34 @@ Source: `vendor/AutoCorrode/ir/repl.py`, lines 35–44 (docstring), 917, 2210.
 
 - **Default port**: `9147` (`REPL_DEFAULT_PORT`, defined at line 302). When `--port 0` (default), repl.py tries to bind 9147 first; if that fails, lets the OS assign any free port.
 - **Override flag**: `--port NN`
-- **Bind address**: `127.0.0.1` exclusively. Hard-coded in `Server.__init__` (line 920) and confirmed in README.md ("All TCP listeners bind exclusively to `127.0.0.1`").
+- **Bind address**: `127.0.0.1` exclusively. Hard-coded in `Server.__init__` (line 911, default `host="127.0.0.1"` argument) and confirmed in README.md ("All TCP listeners bind exclusively to `127.0.0.1`").
 - **Auth handshake**: The client must send the token as the **first line** (terminated by `\n`) immediately after connecting. The server responds with `OK\n` on success or `ERR: authentication failed\n` on failure (lines 1333–1343). The token is printed to stdout on startup: `IR_Repl.token: <token>`. It can be pre-set via `IR_AUTH_TOKEN`.
 - **Message framing (client → server)**: Newline-delimited plain text. The client sends ML-style command strings as a single line ending with `\n`. Commands accumulate until a line whose stripped text ends with `;` — that is the command terminator. Multi-line commands are joined with spaces. The server processes one command at a time per connection (serialized through the ML connection pool).
 - **Message framing (server → client)**: Each command response is a text block terminated by the sentinel line `<<DONE>>\n`. Error responses are prefixed with `ERR\n` before the body text, followed by `<<DONE>>\n`. YXML markup in the raw ML output is stripped to plain text before sending over TCP. The sentinel constant is defined as `SENTINEL = "<<DONE>>"` at line 301.
 
 Source: `vendor/AutoCorrode/ir/repl.py`, lines 301–303, 911–941, 1317–1410; `vendor/AutoCorrode/ir/README.md`, lines 102–108.
+
+### Reference: minimal Python client snippet
+
+```python
+import socket
+
+sock = socket.socket()
+sock.connect(("127.0.0.1", 9147))
+
+sock.sendall(b"token-here\n")          # auth
+# read until b"OK\n"
+sock.sendall(b'Ir.init "R" ["Main"];\n')
+# read until b"\n<<DONE>>\n"
+sock.sendall(b'Ir.step "R" "lemma foo: 1 + 1 = (2::nat)";\n')
+# read until b"\n<<DONE>>\n"
+sock.sendall(b'Ir.step "R" "by simp";\n')
+# read until b"\n<<DONE>>\n"
+sock.sendall(b'Ir.remove "R";\n')
+# read until b"\n<<DONE>>\n"
+```
+
+This is a reference for Task 7 — not a test assertion. In practice, use a buffered reader that accumulates lines until a line equal to `<<DONE>>` is received.
 
 ### Internal ML_Repl framing (repl.py ↔ Poly/ML, not client-facing)
 
@@ -120,6 +142,29 @@ or continuing a proof:
 - First argument: REPL id.
 - Second argument: Isar text to execute (quoted string, ML-escaped).
 
+#### ML string escaping
+
+SML string-literal escaping rules apply to the second argument of `Ir.step`:
+
+- `\\` for a literal backslash
+- `\"` for a literal double-quote
+- `\n` for newline
+- `\t` for tab
+
+Example — to send the Isar command:
+
+    lemma foo: "True"
+
+construct the TCP payload:
+
+    Ir.step "R" "lemma foo: \"True\"";
+
+Isabelle symbol syntax such as `\<and>` does NOT need extra escaping — only
+the SML string-literal escapes above. Send `\<and>` as the literal seven-character
+sequence `\`, `<`, `a`, `n`, `d`, `>` (plus surrounding quote escapes if needed).
+
+(Source: standard SML escaping; consumed by `Ir.step` at `ir.ML:474–484`.)
+
 **Response on success** — the current proof state (or theory state if proof is closed):
 
     proof (prove)
@@ -132,7 +177,14 @@ When a proof closes (e.g., after `by simp` on a trivially provable goal), the re
     theorem my_lemma: 1 + 1 = 2
     <<DONE>>
 
-**Proof-closed indicator**: There is no explicit boolean field. The proof is closed when `Toplevel.is_proof (last_state r)` is false after the step — which is reflected in the response text showing a theorem declaration (`theorem ...`) rather than a `goal (N subgoal...)` block. From a protocol client's perspective, a completed proof is indicated by the absence of a `goal (` line in the response and the presence of a `theorem ` line.
+**Proof-closed indicator (heuristic — must be empirically validated in Task 7)**:
+
+Empirically expected: after a successful `by simp` or `done`/`qed`, the response
+body shows no `goal (N subgoal` line and includes a `theorem ` line printed by
+`Toplevel.pretty_state` when the proof state returns to theory toplevel.
+
+This heuristic is NOT machine-readable and MAY differ for `oops`, `sorry`,
+structured proofs, and locales. See "Open questions / quirks" item 1.
 
 **Step timeout**: Default 10 seconds per step. On timeout, the response is prefixed `ERR\n` with body `Step timed out after 10s`. Override per-REPL with `Ir.timeout "R" N;` (0 = unlimited).
 
@@ -152,6 +204,15 @@ There is no `Ir.close` command. To clean up a REPL, use `Ir.remove`:
 
     Removed "R"
     <<DONE>>
+
+> Note: when the REPL being removed has descendant REPLs (forked sub-REPLs), the response
+> lists all removed REPLs comma-separated:
+>
+>     Removed "R", "child1", "child2"
+>     <<DONE>>
+>
+> Clients should match the prefix `Removed ` rather than an exact string.
+> (Source: `vendor/AutoCorrode/ir/ir.ML:708`.)
 
 `Ir.remove` also removes all descendant REPLs forked from the target.
 
@@ -195,9 +256,31 @@ Source: `vendor/AutoCorrode/ir/mcp_server.py` (not read in detail; confirmed it 
 
 2. **Command terminator sensitivity**: The server accumulates lines into one command until a line ending in `;` is received. Sending a command without a trailing semicolon will hang the connection. The ML side also validates this and immediately returns an error if the semicolon is missing.
 
-3. **Token discovery**: The token is printed to stdout as `IR_Repl.token: <token>` before the REPL-ready line. The subprocess launcher in Task 6 must read stdout to capture this token. The exact regex used in `repl.py` for parsing startup output from its own ML subprocess can serve as a reference: `Tcp_Handler: listening on 127\.0\.0\.1:(\d+)(?: \(token "([^"]*)")?`.
+3a. **Token discovery (outer server)**: The token for the outer `repl.py` TCP server is printed to stdout — ANSI-free — as:
 
-4. **Port discovery**: Both the ML_Repl internal port (default 9146) and the repl.py client-facing port (default 9147) are printed to stdout. The client-facing port that Tasks 6–8 need is the one announced as `● REPL ready. Waiting for connections on 127.0.0.1:<port>` (line 2457–2458).
+        IR_Repl.token: <token>
+
+    This line appears at `repl.py:2456` **before** the port announcement. Capture it with:
+
+        r"IR_Repl\.token: (\S+)"
+
+    The token can also be pre-set via the `IR_AUTH_TOKEN` environment variable to skip stdout parsing entirely.
+
+3b. **Port discovery (outer server vs. internal ML port — do not confuse)**:
+
+    The outer `repl.py` server port is announced at `repl.py:2457–2458`:
+
+        ● REPL ready. Waiting for connections on 127.0.0.1:<port>
+
+    That line is emitted via `mgmt_output(...)` (which is `print()` to stdout), but the surrounding words are wrapped in ANSI escape codes (`\033[32m`, `\033[0m`, `\033[1m`). The digit sequence itself is unaffected, so this regex works against the raw line:
+
+        r"Waiting for connections on 127\.0\.0\.1:(\d+)"
+
+    **The `Tcp_Handler: listening on 127.0.0.1:(\d+)(?: \(token "([^"]*)"\))?` regex is for the *internal* Poly/ML ML_Repl port** — it is consumed by `PolyMLProcess.read_actual_port()` inside `repl.py` itself (`repl.py:621–624`) and is NOT intended for external clients. Do not use it in Task 6's subprocess launcher.
+
+    **Recommended mitigation**: pass `--port 9147` (or any chosen fixed port) explicitly to `repl.py`. Then Task 6's launcher never needs to parse the port at all — only the token needs to be captured from stdout (ANSI-free, see 3a above).
+
+4. **Port discovery**: Both the ML_Repl internal port (default 9146) and the repl.py client-facing port (default 9147) are printed to stdout. The client-facing port that Tasks 6–8 need is the one announced as `● REPL ready. Waiting for connections on 127.0.0.1:<port>` (lines 2457–2458). See item 3b above for the correct regex and the recommended `--port` shortcut.
 
 5. **`Ir.close` does not exist**: The correct teardown command is `Ir.remove "R";`. Or simply close the TCP socket — there is no session-end handshake required.
 
