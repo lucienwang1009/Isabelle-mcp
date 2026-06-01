@@ -23,7 +23,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["IRDaemonHandle", "IRSession", "launch_ir_daemon"]
+__all__ = ["IRDaemonHandle", "IRSession", "launch_ir_daemon", "proof_closed"]
 
 # `IR_Repl.token: <token>` printed by repl.py:2456 (no ANSI codes).
 _TOKEN_RE = re.compile(r"^IR_Repl\.token:\s*(\S+)\s*$")
@@ -384,3 +384,30 @@ class IRSession:
         except (ConnectionError, socket.timeout, BrokenPipeError):
             # Daemon may have closed already; that's fine for cleanup.
             pass
+
+
+# -----------------------------------------------------------------------------
+# Response interpretation helpers.
+# -----------------------------------------------------------------------------
+
+# Remaining goals are printed by Isabelle as e.g. "goal (1 subgoal):".
+_REMAINING_GOALS_RE = re.compile(r"goal \(\d+ subgoal")
+# A finished proof returns to the theory toplevel, printed as "theorem name: ...".
+_THEOREM_TOPLEVEL_RE = re.compile(r"^theorem\b", re.MULTILINE)
+
+
+def proof_closed(response: dict[str, Any]) -> bool:
+    """Decide whether an :meth:`IRSession.step` response closed the proof.
+
+    I/R's TCP protocol is plain text (no machine-readable goal count), so we
+    inspect the rendered proof state. A proof is closed when the step
+    succeeded, no remaining subgoals are printed, and the prover has returned
+    to the theory toplevel (a ``theorem ...`` line). Verified empirically
+    against Isabelle2025-2; see ``docs/ir-protocol-notes.md``.
+    """
+    if not response.get("ok"):
+        return False
+    body = response.get("body", "")
+    if _REMAINING_GOALS_RE.search(body):
+        return False
+    return bool(_THEOREM_TOPLEVEL_RE.search(body))

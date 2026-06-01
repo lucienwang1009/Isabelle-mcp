@@ -179,14 +179,28 @@ When a proof closes (e.g., after `by simp` on a trivially provable goal), the re
     theorem my_lemma: 1 + 1 = 2
     <<DONE>>
 
-**Proof-closed indicator (heuristic — must be empirically validated in Task 7)**:
+**Proof-closed indicator (empirically validated against Isabelle2025-2 in Task 8)**:
 
-Empirically expected: after a successful `by simp` or `done`/`qed`, the response
-body shows no `goal (N subgoal` line and includes a `theorem ` line printed by
-`Toplevel.pretty_state` when the proof state returns to theory toplevel.
+Observed step-response bodies (envelope = `{"ok": bool, "body": str}` produced
+by `IRSession`; a trailing `[timing] Ns` line is always appended):
 
-This heuristic is NOT machine-readable and MAY differ for `oops`, `sorry`,
-structured proofs, and locales. See "Open questions / quirks" item 1.
+- Combined `theorem t1: "1 + 1 = (2::nat)" by simp` →
+  `{"ok": True, "body": "theorem t1: 1 + 1 = 2\n[timing] 0.002s"}`
+- Open goal `theorem t2: "1 + 1 = (2::nat)"` →
+  `{"ok": True, "body": "proof (prove)\ngoal (1 subgoal):\n 1. 1 + 1 = 2\n[timing] ..."}`
+- Closing the open goal with `by simp` →
+  `{"ok": True, "body": "theorem t2: 1 + 1 = 2\n[timing] ..."}`
+- False goal `theorem t4: "1 + 1 = (3::nat)" by simp` →
+  `{"ok": False, "body": "Failed to finish proof:\ngoal (1 subgoal):\n 1. False\n..."}`
+
+A proof is therefore closed iff: `ok` is `True`, the body has **no**
+`goal (N subgoal` line, **and** the body contains a `theorem ` toplevel line
+(prover returned to theory level). This is implemented in
+`isabelle_mcp.ir_client.proof_closed`.
+
+This heuristic is NOT machine-readable and MAY still differ for `oops`,
+`sorry`, structured proofs, and locales (not exercised by M0). See "Open
+questions / quirks" item 1.
 
 **Step timeout**: Default 10 seconds per step. On timeout, the response is prefixed `ERR\n` with body `Step timed out after 10s`. Override per-REPL with `Ir.timeout "R" N;` (0 = unlimited).
 
