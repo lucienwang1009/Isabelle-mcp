@@ -3,7 +3,32 @@ name: isabelle-proving
 description: Standard autonomous-proving loop for LLMs using isabelle-mcp.
 ---
 
-# isabelle-proving
+# Proving with isabelle-mcp
 
-Placeholder. Full content authored in milestone M5; see
-`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md` Section 5.
+Use these tools when you are extending Isabelle/HOL theories and need to make
+proofs go through. The server wraps a stateful, branchable Isabelle REPL.
+
+## The loop
+
+1. **Open a REPL** at a theory with `isabelle_open_repl(theory="Main")`. You get
+   back an opaque `repl_id`; pass it to every other call.
+2. **State the goal**: `isabelle_step(repl_id, isar='theorem t: "P x"')`. The
+   response shows the current proof state and `at_end_of_proof`.
+3. **Drive the proof** with one `isabelle_step` per Isar command (e.g.
+   `by simp`, `apply auto`, `proof - … qed`). Send ONE command per step.
+4. **Check progress**: when a step returns `at_end_of_proof: true`, the goal is
+   closed. Use `isabelle_state(repl_id)` any time to see history + open goals.
+5. **Backtrack** with `isabelle_undo(repl_id, n=1)` to drop the last step(s);
+   `isabelle_fork_repl(repl_id)` to try an alternative without losing the
+   current line.
+6. **Clean up** with `isabelle_close_repl(repl_id)` when done.
+
+## Discipline
+
+- One REPL per active proof; close it when finished.
+- One Isar command per `isabelle_step` — never paste a whole proof script.
+- Read `error.code` on failure: `parse_error` (fix syntax), `tactic_failed`
+  (the tactic didn't close the goal — inspect state, try another), `timeout`
+  (raise `timeout_s` or simplify), `repl_not_found` (open a fresh REPL).
+
+Automation (`sledgehammer`, `try0`, `find_theorems`) arrives in later versions.
