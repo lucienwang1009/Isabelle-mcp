@@ -1,0 +1,112 @@
+"""Unit tests for IRManager's opaque repl_id registry (no Isabelle required).
+
+A fake session stands in for the real I/R connection so the mapping logic,
+error translation, and registry bookkeeping can be tested without a daemon.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from isabelle_mcp.errors import ToolError
+from isabelle_mcp.lifecycle import IRManager
+
+
+class FakeSession:
+    """Minimal stand-in for IRSession; records calls, returns canned replies."""
+
+    def __init__(self) -> None:
+        self.inited: list[str] = []
+        self.removed: list[str] = []
+
+    def init(self, *, repl_id: str, theories: list[str]) -> str:
+        self.inited.append(repl_id)
+        return repl_id
+
+    def fork(self, parent_id: str, new_id: str, *, state_idx: int = -1) -> dict[str, Any]:
+        return {"ok": True, "body": f'Forked REPL "{new_id}"'}
+
+    def step(self, repl_id: str, *, isar: str, timeout_seconds: float = 60.0) -> dict[str, Any]:
+        return {"ok": True, "body": "theorem t: P\n[timing] 0.0s"}
+
+    def state(self, repl_id: str, *, state_idx: int = -1) -> dict[str, Any]:
+        return {"ok": True, "body": ""}
+
+    def history(self, repl_id: str) -> list[str]:
+        return []
+
+    def undo(self, repl_id: str, *, n: int = 1) -> dict[str, Any]:
+        return {"ok": True, "body": "Truncated"}
+
+    def remove(self, repl_id: str) -> None:
+        self.removed.append(repl_id)
+
+
+@pytest.fixture
+def manager_with_fake() -> tuple[IRManager, FakeSession]:
+    mgr = IRManager(isabelle_bin="/nonexistent", ir_dir=Path("/nonexistent"))
+    fake = FakeSession()
+
+    @contextlib.contextmanager
+    def _fake_session() -> Iterator[FakeSession]:
+        yield fake
+
+    mgr._session = _fake_session  # type: ignore[assignment,method-assign]
+    return mgr, fake
+
+
+def test_open_issues_opaque_id_mapped_to_internal(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    result = mgr.open({"theory": "Main"})
+    repl_id = result["repl_id"]
+    # The opaque id is NOT the internal id given to I/R.
+    assert isinstance(repl_id, str) and repl_id
+    assert fake.inited == [f"mcp_{repl_id}"]
+    assert repl_id != fake.inited[0]
+
+
+def test_resolve_unknown_raises_repl_not_found(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+    with pytest.raises(ToolError) as exc:
+        mgr.step("does-not-exist", "by simp")
+    assert exc.value.code == "repl_not_found"
+
+
+def test_close_repl_removes_mapping_and_calls_remove(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    internal = f"mcp_{repl_id}"
+    mgr.close_repl(repl_id)
+    assert fake.removed == [internal]
+    # Subsequent use of the id fails as not found.
+    with pytest.raises(ToolError) as exc:
+        mgr.state(repl_id)
+    assert exc.value.code == "repl_not_found"
+
+
+def test_open_requires_theory_or_parent(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+    with pytest.raises(ToolError) as exc:
+        mgr.open({})
+    assert exc.value.code == "invalid_argument"
+
+
+def test_ir_unavailable_when_not_started() -> None:
+    mgr = IRManager(isabelle_bin="/nonexistent", ir_dir=Path("/nonexistent"))
+    with pytest.raises(ToolError) as exc:
+        mgr.step("any", "by simp")
+    # _resolve runs first and the id is unknown -> repl_not_found.
+    assert exc.value.code == "repl_not_found"
