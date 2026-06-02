@@ -72,11 +72,13 @@ class IRManager:
         isabelle_bin: str,
         ir_dir: Path,
         session: str = "HOL",
+        port: int | None = None,
         startup_timeout_seconds: float = 120.0,
     ) -> None:
         self._isabelle_bin = isabelle_bin
         self._ir_dir = ir_dir
         self._session_name = session
+        self._port = port
         self._startup_timeout = startup_timeout_seconds
         self._handle: IRDaemonHandle | None = None
         self._registry: dict[str, str] = {}  # opaque uuid -> internal id
@@ -94,6 +96,7 @@ class IRManager:
                 isabelle_bin=self._isabelle_bin,
                 ir_dir=self._ir_dir,
                 session=self._session_name,
+                port=self._port,
                 startup_timeout_seconds=self._startup_timeout,
             )
 

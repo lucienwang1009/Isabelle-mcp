@@ -54,10 +54,13 @@ def _ir_dir() -> Path:
 
 def manager_from_env() -> IRManager:
     """Construct an IRManager from environment (does not start the daemon)."""
+    port_raw = os.environ.get("ISABELLE_MCP_PORT")
+    port = int(port_raw) if port_raw else None
     return IRManager(
         isabelle_bin=_find_isabelle_bin(),
         ir_dir=_ir_dir(),
         session=os.environ.get("ISABELLE_MCP_SESSION", "HOL"),
+        port=port,
     )
 
 
