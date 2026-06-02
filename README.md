@@ -13,4 +13,36 @@ Status: pre-alpha. See [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.m
 
 ## Quick start
 
-Not yet shippable. Watch this space.
+> Status: **M1** — the stdio MCP server exposes Layer B (REPL) tools. Layer C
+> automation and Layer A file-anchored tools land in later milestones.
+
+**Prerequisites:** Isabelle 2025-2 with a prebuilt HOL image, `uv`, and the
+vendored submodule. See [`docs/m0-setup.md`](docs/m0-setup.md).
+
+```bash
+git submodule update --init --recursive
+uv sync
+export ISABELLE_HOME=/path/to/Isabelle2025-2(.app)   # dir containing bin/isabelle
+uv run isabelle-mcp                                   # serves MCP over stdio
+```
+
+Register it with an MCP client (e.g. Claude Code `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "isabelle": {
+      "command": "uv",
+      "args": ["run", "isabelle-mcp"],
+      "env": { "ISABELLE_HOME": "/path/to/Isabelle2025-2.app" }
+    }
+  }
+}
+```
+
+The server advertises six Layer B tools: `isabelle_open_repl`, `isabelle_step`,
+`isabelle_undo`, `isabelle_state`, `isabelle_fork_repl`, `isabelle_close_repl`.
+The proving-loop SKILL is served as the MCP `instructions` preamble.
+
+Optional env: `ISABELLE_MCP_SESSION` (default `HOL`), `ISABELLE_MCP_PORT`,
+`ISABELLE_MCP_MAX_PREVIEW_CHARS` (default 4000), `ISABELLE_MCP_LOG_LEVEL`.
