@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
     "anyio>=4.13.0",
     "httpx>=0.28.1",
+    "mcp>=1.27.2",
 ]
 
 [project.scripts]
