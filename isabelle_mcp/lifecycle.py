@@ -211,6 +211,7 @@ class IRManager:
         return {
             "history": history,
             "current_goals": _truncate(body),
+            "goals": parsing.parse_goal_state(body),
             "at_end_of_proof": _state_at_end_of_proof(body),
         }
 
@@ -307,3 +308,85 @@ class IRManager:
         body = self._diagnostic(repl_id, f"thm_deps {name}", timeout_seconds)
         parsed = parsing.parse_thm_deps(body)
         return {"dependencies": parsed["dependencies"]}
+
+    # --- Layer A (orchestration over Layer B) --------------------------------
+
+    def run_code(
+        self, code: str, *, timeout_seconds: float = 30.0
+    ) -> dict[str, object]:
+        """Run one Isar/HOL command in a fresh transient REPL on ``Main``.
+
+        Returns ``{output, at_end_of_proof}``; raises ToolError on failure. The
+        transient REPL is removed afterward (no registry entry).
+        """
+        internal = f"mcp_run_{secrets.token_hex(6)}"
+        with self._session() as session:
+            session.init(repl_id=internal, theories=["Main"])
+            session._set_step_timeout(internal, int(timeout_seconds))
+            try:
+                env = session.step(
+                    internal, isar=code, timeout_seconds=float(timeout_seconds) + 10.0
+                )
+            finally:
+                session.remove(internal)
+        if not env["ok"]:
+            raise ToolError(map_ir_error(env["body"]), env["body"])
+        return {
+            "output": _truncate(_strip_timing(env["body"])),
+            "at_end_of_proof": proof_closed(env),
+        }
+
+    def multi_attempt(
+        self, repl_id: str, tactics: list[str], *, timeout_seconds: float = 15.0
+    ) -> dict[str, object]:
+        """Try each tactic on a fork of the open-proof REPL; report outcomes.
+
+        The original REPL is untouched. Each attempt forks, steps the tactic on
+        the throwaway fork, records the outcome, and removes the fork.
+        """
+        internal = self._resolve(repl_id)
+        attempts: list[dict[str, object]] = []
+        with self._session() as session:
+            for tactic in tactics:
+                fork_id = f"{internal}_ma_{secrets.token_hex(4)}"
+                fork_env = session.fork(internal, fork_id)
+                if not fork_env["ok"]:
+                    attempts.append(
+                        {
+                            "tactic": tactic,
+                            "ok": False,
+                            "error_code": map_ir_error(fork_env["body"]),
+                            "error": _truncate(fork_env["body"]),
+                        }
+                    )
+                    continue
+                try:
+                    session._set_step_timeout(fork_id, int(timeout_seconds))
+                    env = session.step(
+                        fork_id,
+                        isar=tactic,
+                        timeout_seconds=float(timeout_seconds) + 10.0,
+                    )
+                finally:
+                    session.remove(fork_id)
+                if env["ok"]:
+                    goals = parsing.parse_goal_state(env["body"])
+                    attempts.append(
+                        {
+                            "tactic": tactic,
+                            "ok": True,
+                            "closes_goal": proof_closed(env),
+                            "remaining_goals": goals["goal_count"],
+                            "goal_preview": _truncate(_strip_timing(env["body"])),
+                        }
+                    )
+                else:
+                    attempts.append(
+                        {
+                            "tactic": tactic,
+                            "ok": False,
+                            "error_code": map_ir_error(env["body"]),
+                            "error": _truncate(env["body"]),
+                        }
+                    )
+        return {"attempts": attempts}
