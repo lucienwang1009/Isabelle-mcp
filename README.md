@@ -53,7 +53,26 @@ Tools advertised:
 
 The proving-loop SKILL is served as the MCP `instructions` preamble.
 
-Optional env: `ISABELLE_MCP_SESSION` (default `HOL`), `ISABELLE_MCP_PORT`,
-`ISABELLE_MCP_NO_BASH_SERVER=1` (disables sledgehammer's ATPs for faster start),
-`ISABELLE_MCP_EXPOSE_ADVANCED=1`, `ISABELLE_MCP_MAX_PREVIEW_CHARS` (default 4000),
-`ISABELLE_MCP_LOG_LEVEL`.
+### Transports
+
+Default is stdio. Set `ISABELLE_MCP_TRANSPORT=streamable-http` (or `sse`) to
+serve over HTTP on `ISABELLE_MCP_HOST` (default `127.0.0.1`) /
+`ISABELLE_MCP_PORT_HTTP` (default `8000`); a Prometheus `GET /metrics` endpoint
+is exposed under HTTP.
+
+### Environment variables
+
+| Var | Purpose |
+|---|---|
+| `ISABELLE_MCP_SESSION` | Isabelle session image (default `HOL`) |
+| `ISABELLE_MCP_TRANSPORT` | `stdio` (default), `sse`, `streamable-http` |
+| `ISABELLE_MCP_PORT` | I/R daemon TCP port (default 9147) |
+| `ISABELLE_MCP_HOST` / `ISABELLE_MCP_PORT_HTTP` | HTTP bind (default 127.0.0.1:8000) |
+| `ISABELLE_MCP_NO_BASH_SERVER=1` | Disable sledgehammer's ATPs (faster start) |
+| `ISABELLE_MCP_EXPOSE_ADVANCED=1` | Expose `isabelle_thm_deps` |
+| `ISABELLE_MCP_DISABLED_TOOLS` | Comma-separated tool names to hide |
+| `ISABELLE_MCP_ALLOWED_DIRS` | Extra roots for `file_outline` (path-separated) |
+| `ISABELLE_MCP_MAX_TIMEOUT_S` | Per-call timeout ceiling (default 600) |
+| `ISABELLE_MCP_REPL_TTL_S` | Idle-REPL TTL before reaping (default 1800) |
+| `ISABELLE_MCP_MAX_PREVIEW_CHARS` | Output truncation (default 4000) |
+| `ISABELLE_MCP_LOG_LEVEL` | Log level for the JSON logs |

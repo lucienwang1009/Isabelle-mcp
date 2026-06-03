@@ -12,9 +12,11 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from isabelle_mcp.lifecycle import IRManager
+from isabelle_mcp.logging import configure_logging
 from isabelle_mcp.tools.layer_a import register_layer_a
 from isabelle_mcp.tools.layer_b import register_layer_b
 from isabelle_mcp.tools.layer_c import register_layer_c
+from isabelle_mcp.transports.http import run_http
 from isabelle_mcp.transports.stdio import run_stdio
 
 logger = logging.getLogger(__name__)
@@ -93,11 +95,13 @@ def _apply_disabled_tools(mcp: FastMCP) -> None:
 
 
 def main() -> None:
-    """CLI entry point (pyproject [project.scripts] isabelle-mcp)."""
-    logging.basicConfig(
-        level=os.environ.get("ISABELLE_MCP_LOG_LEVEL", "INFO"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    """CLI entry point (pyproject [project.scripts] isabelle-mcp).
+
+    Transport is chosen by ``ISABELLE_MCP_TRANSPORT`` (``stdio`` default; also
+    ``sse`` / ``streamable-http``).
+    """
+    configure_logging(os.environ.get("ISABELLE_MCP_LOG_LEVEL", "INFO"))
+    transport = os.environ.get("ISABELLE_MCP_TRANSPORT", "stdio")
     manager = manager_from_env()
     mcp = build_server(manager)
     try:
@@ -105,7 +109,10 @@ def main() -> None:
     except Exception:  # noqa: BLE001 - tools will report ir_unavailable
         logger.exception("failed to start I/R daemon; tools will report ir_unavailable")
     try:
-        run_stdio(mcp)
+        if transport == "stdio":
+            run_stdio(mcp)
+        else:
+            run_http(mcp, transport)
     finally:
         manager.close()
 
