@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 
 from isabelle_mcp.lifecycle import IRManager
 from isabelle_mcp.tools.layer_b import register_layer_b
+from isabelle_mcp.tools.layer_c import register_layer_c
 from isabelle_mcp.transports.stdio import run_stdio
 
 logger = logging.getLogger(__name__)
@@ -56,18 +57,23 @@ def manager_from_env() -> IRManager:
     """Construct an IRManager from environment (does not start the daemon)."""
     port_raw = os.environ.get("ISABELLE_MCP_PORT")
     port = int(port_raw) if port_raw else None
+    # Bash.Server is needed for sledgehammer's ATPs; on by default (M2).
+    bash_server = os.environ.get("ISABELLE_MCP_NO_BASH_SERVER") != "1"
     return IRManager(
         isabelle_bin=_find_isabelle_bin(),
         ir_dir=_ir_dir(),
         session=os.environ.get("ISABELLE_MCP_SESSION", "HOL"),
         port=port,
+        bash_server=bash_server,
     )
 
 
 def build_server(manager: IRManager | None = None) -> FastMCP:
-    """Build a FastMCP server with the SKILL preamble and Layer B tools."""
+    """Build a FastMCP server with the SKILL preamble and Layer B + C tools."""
     mcp = FastMCP("isabelle-mcp", instructions=_load_instructions())
-    register_layer_b(mcp, manager if manager is not None else manager_from_env())
+    target = manager if manager is not None else manager_from_env()
+    register_layer_b(mcp, target)
+    register_layer_c(mcp, target)
     return mcp
 
 

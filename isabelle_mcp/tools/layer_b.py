@@ -11,31 +11,17 @@ from __future__ import annotations
 
 import logging
 import secrets
-from collections.abc import Callable
 from typing import Any
 
-import anyio
 from mcp.server.fastmcp import FastMCP
 
-from isabelle_mcp.errors import ToolError, error_envelope, ok
+from isabelle_mcp.errors import error_envelope
 from isabelle_mcp.lifecycle import IRManager
+from isabelle_mcp.tools import run_tool
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["register_layer_b"]
-
-
-async def _run(fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-    """Run a blocking IRManager op in a thread and wrap it in an envelope."""
-    correlation_id = secrets.token_hex(6)
-    try:
-        payload = await anyio.to_thread.run_sync(fn)
-        return ok(**payload)
-    except ToolError as exc:
-        return error_envelope(exc.code, exc.message, correlation_id, hint=exc.hint)
-    except Exception as exc:  # noqa: BLE001 - surfaced as an envelope, not raised
-        logger.exception("unexpected error in tool")
-        return error_envelope("internal_error", str(exc), correlation_id)
 
 
 def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
@@ -66,7 +52,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
                 "provide either `theory` or `parent_repl_id`",
                 secrets.token_hex(6),
             )
-        return await _run(lambda: manager.open(at))
+        return await run_tool(lambda: manager.open(at))
 
     @mcp.tool(
         name="isabelle_step",
@@ -81,7 +67,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
     async def isabelle_step(
         repl_id: str, isar: str, timeout_s: int = 60
     ) -> dict[str, Any]:
-        return await _run(
+        return await run_tool(
             lambda: manager.step(repl_id, isar, timeout_seconds=float(timeout_s))
         )
 
@@ -94,7 +80,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_undo(repl_id: str, n: int = 1) -> dict[str, Any]:
-        return await _run(lambda: manager.undo(repl_id, n=n))
+        return await run_tool(lambda: manager.undo(repl_id, n=n))
 
     @mcp.tool(
         name="isabelle_state",
@@ -105,7 +91,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_state(repl_id: str) -> dict[str, Any]:
-        return await _run(lambda: manager.state(repl_id))
+        return await run_tool(lambda: manager.state(repl_id))
 
     @mcp.tool(
         name="isabelle_fork_repl",
@@ -116,7 +102,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_fork_repl(repl_id: str) -> dict[str, Any]:
-        return await _run(lambda: manager.fork(repl_id))
+        return await run_tool(lambda: manager.fork(repl_id))
 
     @mcp.tool(
         name="isabelle_close_repl",
@@ -127,4 +113,4 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_close_repl(repl_id: str) -> dict[str, Any]:
-        return await _run(lambda: manager.close_repl(repl_id))
+        return await run_tool(lambda: manager.close_repl(repl_id))

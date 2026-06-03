@@ -31,4 +31,18 @@ proofs go through. The server wraps a stateful, branchable Isabelle REPL.
   (the tactic didn't close the goal — inspect state, try another), `timeout`
   (raise `timeout_s` or simplify), `repl_not_found` (open a fresh REPL).
 
-Automation (`sledgehammer`, `try0`, `find_theorems`) arrives in later versions.
+## Automation (use when stuck on a goal)
+
+These inspect the current goal without changing it:
+
+- `isabelle_try0(repl_id)` — cheap; tries simp/auto/blast/… and reports a
+  one-liner if one closes the goal. **Try this first.**
+- `isabelle_sledgehammer(repl_id, timeout_s=120)` — external provers search for
+  a proof; returns `one_liner` tactics. Use when `try0` fails.
+- `isabelle_find_theorems(repl_id, query=...)` — find lemmas to cite, then retry.
+- `isabelle_nitpick(repl_id)` / `isabelle_quickcheck(repl_id)` — check whether
+  the goal is even true (look for a counterexample) before sinking time into it.
+
+When `try0`/`sledgehammer` returns a one-liner, apply it with `isabelle_step`.
+Anti-patterns: reaching for sledgehammer first; ignoring a nitpick/quickcheck
+counterexample.
