@@ -35,7 +35,8 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
     )
     async def isabelle_try0(repl_id: str, timeout_s: int = 10) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.try0(repl_id, timeout_seconds=float(timeout_s))
+            lambda: manager.try0(repl_id, timeout_seconds=float(timeout_s)),
+            tool="isabelle_try0",
         )
 
     @mcp.tool(
@@ -51,7 +52,8 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
         repl_id: str, timeout_s: int = 120, minimize: bool = True
     ) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.sledgehammer(repl_id, timeout_seconds=float(timeout_s))
+            lambda: manager.sledgehammer(repl_id, timeout_seconds=float(timeout_s)),
+            tool="isabelle_sledgehammer",
         )
 
     @mcp.tool(
@@ -69,7 +71,8 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
         return await run_tool(
             lambda: manager.find_theorems(
                 repl_id, query=query, max_results=max_results
-            )
+            ),
+            tool="isabelle_find_theorems",
         )
 
     @mcp.tool(
@@ -82,7 +85,8 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
     )
     async def isabelle_nitpick(repl_id: str, timeout_s: int = 30) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.nitpick(repl_id, timeout_seconds=float(timeout_s))
+            lambda: manager.nitpick(repl_id, timeout_seconds=float(timeout_s)),
+            tool="isabelle_nitpick",
         )
 
     @mcp.tool(
@@ -97,7 +101,8 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
         repl_id: str, timeout_s: int = 10
     ) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.quickcheck(repl_id, timeout_seconds=float(timeout_s))
+            lambda: manager.quickcheck(repl_id, timeout_seconds=float(timeout_s)),
+            tool="isabelle_quickcheck",
         )
 
     if os.environ.get("ISABELLE_MCP_EXPOSE_ADVANCED") == "1":
@@ -111,4 +116,4 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
             ),
         )
         async def isabelle_thm_deps(name: str, repl_id: str) -> dict[str, Any]:
-            return await run_tool(lambda: manager.thm_deps(name, repl_id))
+            return await run_tool(lambda: manager.thm_deps(name, repl_id), tool="isabelle_thm_deps")

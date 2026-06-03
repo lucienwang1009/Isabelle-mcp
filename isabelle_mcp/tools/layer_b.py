@@ -52,7 +52,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
                 "provide either `theory` or `parent_repl_id`",
                 secrets.token_hex(6),
             )
-        return await run_tool(lambda: manager.open(at))
+        return await run_tool(lambda: manager.open(at), tool="isabelle_open_repl")
 
     @mcp.tool(
         name="isabelle_step",
@@ -68,7 +68,8 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         repl_id: str, isar: str, timeout_s: int = 60
     ) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.step(repl_id, isar, timeout_seconds=float(timeout_s))
+            lambda: manager.step(repl_id, isar, timeout_seconds=float(timeout_s)),
+            tool="isabelle_step",
         )
 
     @mcp.tool(
@@ -80,7 +81,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_undo(repl_id: str, n: int = 1) -> dict[str, Any]:
-        return await run_tool(lambda: manager.undo(repl_id, n=n))
+        return await run_tool(lambda: manager.undo(repl_id, n=n), tool="isabelle_undo")
 
     @mcp.tool(
         name="isabelle_state",
@@ -91,7 +92,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_state(repl_id: str) -> dict[str, Any]:
-        return await run_tool(lambda: manager.state(repl_id))
+        return await run_tool(lambda: manager.state(repl_id), tool="isabelle_state")
 
     @mcp.tool(
         name="isabelle_fork_repl",
@@ -102,7 +103,7 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_fork_repl(repl_id: str) -> dict[str, Any]:
-        return await run_tool(lambda: manager.fork(repl_id))
+        return await run_tool(lambda: manager.fork(repl_id), tool="isabelle_fork_repl")
 
     @mcp.tool(
         name="isabelle_close_repl",
@@ -113,4 +114,4 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_close_repl(repl_id: str) -> dict[str, Any]:
-        return await run_tool(lambda: manager.close_repl(repl_id))
+        return await run_tool(lambda: manager.close_repl(repl_id), tool="isabelle_close_repl")

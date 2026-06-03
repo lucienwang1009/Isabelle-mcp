@@ -40,7 +40,7 @@ def register_layer_a(mcp: FastMCP, manager: IRManager) -> None:
         def _outline() -> dict[str, Any]:
             return parse_theory_outline(read_theory_file(path))
 
-        return await run_tool(_outline)
+        return await run_tool(_outline, tool="isabelle_file_outline")
 
     @mcp.tool(
         name="isabelle_run_code",
@@ -53,7 +53,8 @@ def register_layer_a(mcp: FastMCP, manager: IRManager) -> None:
     )
     async def isabelle_run_code(code: str, timeout_s: int = 30) -> dict[str, Any]:
         return await run_tool(
-            lambda: manager.run_code(code, timeout_seconds=float(timeout_s))
+            lambda: manager.run_code(code, timeout_seconds=float(timeout_s)),
+            tool="isabelle_run_code",
         )
 
     @mcp.tool(
@@ -72,5 +73,6 @@ def register_layer_a(mcp: FastMCP, manager: IRManager) -> None:
         return await run_tool(
             lambda: manager.multi_attempt(
                 repl_id, tactics, timeout_seconds=float(timeout_s)
-            )
+            ),
+            tool="isabelle_multi_attempt",
         )
