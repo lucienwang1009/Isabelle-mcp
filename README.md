@@ -2,7 +2,10 @@
 
 MCP server exposing Isabelle/HOL to general-purpose LLMs (Claude, GPT) for autonomous theorem proving.
 
-Status: pre-alpha. See [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md`](docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md) for the design.
+Status: **0.1 (beta).** Layer A/B/C tools over stdio or HTTP, with sandboxing,
+crash recovery, idle-REPL cleanup, structured logging, and metrics. See
+[`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md`](docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md)
+for the design and `docs/superpowers/plans/` for the milestone history.
 
 ## Architecture
 
@@ -13,9 +16,9 @@ Status: pre-alpha. See [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.m
 
 ## Quick start
 
-> Status: **M3** — the stdio MCP server exposes Layer A (file/utility), Layer B
-> (REPL) and Layer C (automation) tools. Position-anchored goal_at/diagnostics
-> and hover remain deferred (see the M3 plan).
+> The server exposes Layer A (file/utility), Layer B (REPL) and Layer C
+> (automation) tools. Position-anchored `goal_at`/`diagnostics` and `hover`
+> remain deferred (I/R strips PIDE markup to plain text — see the M3 plan).
 
 **Prerequisites:** Isabelle 2025-2 with a prebuilt HOL image, `uv`, and the
 vendored submodule. See [`docs/m0-setup.md`](docs/m0-setup.md).
@@ -76,3 +79,26 @@ is exposed under HTTP.
 | `ISABELLE_MCP_REPL_TTL_S` | Idle-REPL TTL before reaping (default 1800) |
 | `ISABELLE_MCP_MAX_PREVIEW_CHARS` | Output truncation (default 4000) |
 | `ISABELLE_MCP_LOG_LEVEL` | Log level for the JSON logs |
+
+## Docker
+
+A `Dockerfile` is provided (installs Isabelle 2025-2, builds the HOL heap, and
+runs the server). The image is multi-GB and not built in CI:
+
+```bash
+docker build -t isabelle-mcp .
+docker run --rm -i isabelle-mcp           # stdio
+```
+
+## Development
+
+```bash
+uv sync
+uv run pytest                              # unit tests run without Isabelle
+ISABELLE_HOME=/path/to/Isabelle2025-2.app uv run pytest   # + integration
+```
+
+Tests are marked `integration` (need Isabelle 2025-2 + HOL; auto-skip otherwise)
+and `heavy` (sledgehammer / the end-to-end auto-prover). The reproducible
+end-to-end harness lives at `scripts/e2e_autoprove.py` and closes ≥7/10 fixture
+lemmas via `try0`/`sledgehammer` with no LLM in the loop.

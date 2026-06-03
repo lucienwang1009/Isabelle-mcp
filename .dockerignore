@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.serena
+.claude
+*.log
+dist
+build
+docs/superpowers
+tests/e2e-transcripts
