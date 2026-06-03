@@ -162,6 +162,7 @@ def launch_ir_daemon(
     ir_dir: Path,
     session: str = "HOL",
     port: int | None = None,
+    bash_server: bool = False,
     startup_timeout_seconds: float = 90.0,
 ) -> IRDaemonHandle:
     """Spawn I/R as a subprocess and wait until its TCP listener is up.
@@ -171,6 +172,9 @@ def launch_ir_daemon(
     The token is captured by line-scanning the daemon's stdout for the
     `IR_Repl.token: <token>` announcement (see docs/ir-protocol-notes.md).
     Port is passed explicitly via `--port` to avoid dynamic-port parsing.
+
+    ``bash_server`` enables I/R's Bash.Server, required by sledgehammer's
+    external ATPs (Layer C / M2). It is off by default to keep startup fast.
     """
     repl_script = ir_dir / "repl.py"
     if not repl_script.is_file():
@@ -190,8 +194,9 @@ def launch_ir_daemon(
         "--port",
         str(chosen_port),
         "--server-only",
-        "--no-bash-server",
     ]
+    if not bash_server:
+        cmd.append("--no-bash-server")
 
     logger.info("launching I/R: %s", " ".join(cmd))
     process = subprocess.Popen(

@@ -260,6 +260,35 @@ Source: `vendor/AutoCorrode/ir/ir.ML`, `find_theorems` function, lines 758–775
 
 Source: `vendor/AutoCorrode/ir/ir.ML`, `sledgehammer` function, lines 777–808.
 
+### Layer C (M2) — empirically verified against Isabelle2025-2
+
+The `IR` signature (`ir.ML:15–52`) exports only `init/fork/step/show/state/text/
+edit/replay/truncate/back/merge/pin/unpin/rebase/remove/repls/theories/
+load_theory/source/source_map/sledgehammer/find_theorems/timeout/help` plus the
+`sledgehammer_state`/`sledgehammer_result` vars. It does **not** export the repl
+table or `the_repl`/`last_state`, and the submodule must stay pristine. So a
+custom `extras.ML` cannot reach a REPL's proof state through `Ir`.
+
+**Resolution:** implement try0/nitpick/quickcheck/thm_deps by running the native
+Isar diagnostic commands as a step and then `Ir.back` to drop the recorded step
+(diagnostics do not change the proof state). No `extras.ML` is needed.
+
+Verified behaviors:
+
+- `Ir.find_theorems "R" 3 "name: conjI"` → `displaying N theorem(s):\n<name>: <stmt>` per line. Works at theory and proof level. No history pollution.
+- `Ir.sledgehammer "R" 30` → `... Try this: by <tactic> (Nms)` lines (filtered to "Try this" when any prover succeeds). **Requires Bash.Server** (launch WITHOUT `--no-bash-server`). No history pollution.
+- `Ir.step "R" "try0"` → `Trying ...\nTry this: by simp\n...` followed by the echoed proof state. Appends a step → call `Ir.back "R"` after.
+- `Ir.step "R" "quickcheck"` → `Quickcheck found a counterexample: ...` or `... no counterexample`. Step appended → back.
+- `Ir.step "N" "nitpick"` → `Nitpick found a counterexample:\n ...` or `... no counterexample`. Step appended → back. Does not need Bash.Server.
+- `Ir.step "R" "thm_deps conjI"` → `dependencies: N\n<name>\n...`. Step appended → back.
+
+**Raw ML eval over TCP works** (e.g. `writeln (string_of_int (1+1));` → `2`), so
+`extras.ML` loading is *possible* via `use`/eval, but unnecessary given the above.
+
+The diagnostic step body is `<diagnostic output>\n<echoed proof state>\n[timing]`.
+Strip the trailing proof-state echo by cutting at the first line that begins with
+`proof (` or matches `goal (\d+ subgoal`.
+
 ### MCP server (`mcp_server.py`)
 
 `mcp_server.py` is a separate process launched by `repl.py --mcp`. It wraps the same TCP protocol via an HTTP/MCP layer on port 9148 by default. For M0 we use raw TCP directly and do not need MCP.
