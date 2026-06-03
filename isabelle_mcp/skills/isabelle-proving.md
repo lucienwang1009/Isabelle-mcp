@@ -46,3 +46,13 @@ These inspect the current goal without changing it:
 When `try0`/`sledgehammer` returns a one-liner, apply it with `isabelle_step`.
 Anti-patterns: reaching for sledgehammer first; ignoring a nitpick/quickcheck
 counterexample.
+
+- `isabelle_multi_attempt(repl_id, tactics=[...])` — try several tactics at once
+  on isolated forks; it reports which close the goal without changing your REPL.
+
+## Utilities
+
+- `isabelle_file_outline(path)` — list a `.thy` file's imports and declarations
+  with line numbers, to orient before editing.
+- `isabelle_run_code(code)` — run one Isar command in a scratch context (no REPL
+  bookkeeping) for a quick check.

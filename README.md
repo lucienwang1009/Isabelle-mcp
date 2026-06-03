@@ -13,8 +13,9 @@ Status: pre-alpha. See [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.m
 
 ## Quick start
 
-> Status: **M2** — the stdio MCP server exposes Layer B (REPL) and Layer C
-> (automation) tools. Layer A file-anchored tools land in later milestones.
+> Status: **M3** — the stdio MCP server exposes Layer A (file/utility), Layer B
+> (REPL) and Layer C (automation) tools. Position-anchored goal_at/diagnostics
+> and hover remain deferred (see the M3 plan).
 
 **Prerequisites:** Isabelle 2025-2 with a prebuilt HOL image, `uv`, and the
 vendored submodule. See [`docs/m0-setup.md`](docs/m0-setup.md).
@@ -42,6 +43,8 @@ Register it with an MCP client (e.g. Claude Code `.mcp.json`):
 
 Tools advertised:
 
+- **Layer A (file/utility):** `isabelle_file_outline`, `isabelle_run_code`,
+  `isabelle_multi_attempt`.
 - **Layer B (REPL):** `isabelle_open_repl`, `isabelle_step`, `isabelle_undo`,
   `isabelle_state`, `isabelle_fork_repl`, `isabelle_close_repl`.
 - **Layer C (automation):** `isabelle_try0`, `isabelle_sledgehammer`,
