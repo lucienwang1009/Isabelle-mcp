@@ -22,6 +22,7 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 
+from isabelle_mcp import parsing
 from isabelle_mcp.errors import ToolError, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.ir_daemon import IRDaemonHandle, launch_ir_daemon
@@ -225,3 +226,84 @@ class IRManager:
         with self._lock:
             self._registry.pop(repl_id, None)
         return {}
+
+    # --- Layer C (automation) ------------------------------------------------
+
+    def _diagnostic(self, repl_id: str, command: str, timeout_seconds: float) -> str:
+        """Run a diagnostic Isar command and return its raw body (raises on error)."""
+        internal = self._resolve(repl_id)
+        with self._session() as session:
+            env = session.run_diagnostic(
+                internal, command=command, timeout_secs=int(timeout_seconds)
+            )
+        if not env["ok"]:
+            raise ToolError(map_ir_error(env["body"]), env["body"])
+        return env["body"]
+
+    def try0(self, repl_id: str, *, timeout_seconds: float = 10.0) -> dict[str, object]:
+        """Try standard tactics on the current goal. Returns ``{found, tactic?, output}``."""
+        body = self._diagnostic(repl_id, "try0", timeout_seconds)
+        parsed = parsing.parse_try0(body)
+        return {
+            "found": parsed["found"],
+            "tactic": parsed["tactic"],
+            "output": _truncate(parsed["output"]),
+        }
+
+    def sledgehammer(
+        self, repl_id: str, *, timeout_seconds: float = 120.0
+    ) -> dict[str, object]:
+        """Run sledgehammer. Returns ``{found, one_liner?, suggestions, output}``."""
+        internal = self._resolve(repl_id)
+        with self._session() as session:
+            env = session.sledgehammer(internal, timeout_secs=int(timeout_seconds))
+        if not env["ok"]:
+            raise ToolError(map_ir_error(env["body"]), env["body"])
+        parsed = parsing.parse_sledgehammer(env["body"])
+        return {
+            "found": parsed["found"],
+            "one_liner": parsed["one_liner"],
+            "suggestions": parsed["suggestions"],
+            "output": _truncate(parsed["output"]),
+        }
+
+    def find_theorems(
+        self, repl_id: str, *, query: str, max_results: int = 20
+    ) -> dict[str, object]:
+        """Search the theorem database. Returns ``{count, theorems}``."""
+        internal = self._resolve(repl_id)
+        with self._session() as session:
+            env = session.find_theorems(
+                internal, query=query, max_results=max_results
+            )
+        if not env["ok"]:
+            raise ToolError(map_ir_error(env["body"]), env["body"])
+        parsed = parsing.parse_find_theorems(env["body"])
+        return {"count": parsed["count"], "theorems": parsed["theorems"]}
+
+    def nitpick(
+        self, repl_id: str, *, timeout_seconds: float = 30.0
+    ) -> dict[str, object]:
+        """Look for a counterexample. Returns ``{result, output}``."""
+        body = self._diagnostic(repl_id, "nitpick", timeout_seconds)
+        parsed = parsing.parse_nitpick(body)
+        return {"result": parsed["result"], "output": _truncate(parsed["output"])}
+
+    def quickcheck(
+        self, repl_id: str, *, timeout_seconds: float = 10.0
+    ) -> dict[str, object]:
+        """Randomized counterexample search. Returns ``{found_counterexample, output}``."""
+        body = self._diagnostic(repl_id, "quickcheck", timeout_seconds)
+        parsed = parsing.parse_quickcheck(body)
+        return {
+            "found_counterexample": parsed["found_counterexample"],
+            "output": _truncate(parsed["output"]),
+        }
+
+    def thm_deps(
+        self, name: str, repl_id: str, *, timeout_seconds: float = 30.0
+    ) -> dict[str, object]:
+        """List the axioms/theorems a named theorem depends on. ``{dependencies}``."""
+        body = self._diagnostic(repl_id, f"thm_deps {name}", timeout_seconds)
+        parsed = parsing.parse_thm_deps(body)
+        return {"dependencies": parsed["dependencies"]}
