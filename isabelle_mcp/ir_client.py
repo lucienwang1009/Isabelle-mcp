@@ -227,6 +227,64 @@ class IRSession:
         lines = [ln for ln in body.split("\n") if not ln.startswith("[timing]")]
         return [ln for ln in lines if ln != ""]
 
+    # --- Layer C (automation) ------------------------------------------------
+
+    def find_theorems(
+        self,
+        repl_id: str,
+        *,
+        query: str,
+        max_results: int = 20,
+        timeout_seconds: float = 30.0,
+    ) -> dict[str, Any]:
+        """Search the theorem database (``Ir.find_theorems``). No history change."""
+        cmd = (
+            f'Ir.find_theorems "{_ml_escape(repl_id)}" {_ml_int(max_results)} '
+            f'"{_ml_escape(query)}";'
+        )
+        self._send_command(cmd)
+        return self._read_response(timeout_seconds=timeout_seconds)
+
+    def sledgehammer(
+        self, repl_id: str, *, timeout_secs: int = 120
+    ) -> dict[str, Any]:
+        """Run sledgehammer on the current goal (``Ir.sledgehammer``).
+
+        Needs the daemon launched with the Bash.Server enabled. Does not append
+        a step. The socket read budget exceeds the ATP timeout.
+        """
+        cmd = f'Ir.sledgehammer "{_ml_escape(repl_id)}" {_ml_int(timeout_secs)};'
+        self._send_command(cmd)
+        return self._read_response(timeout_seconds=float(timeout_secs) + 60.0)
+
+    def _set_step_timeout(self, repl_id: str, secs: int) -> None:
+        self._send_command(f'Ir.timeout "{_ml_escape(repl_id)}" {_ml_int(secs)};')
+        self._read_response(timeout_seconds=10.0)
+
+    def run_diagnostic(
+        self, repl_id: str, *, command: str, timeout_secs: int = 30
+    ) -> dict[str, Any]:
+        """Run an Isar diagnostic command (try0/nitpick/quickcheck/thm_deps).
+
+        Diagnostics don't change the proof state, but ``Ir.step`` records them,
+        so on success we ``Ir.back`` to drop the step. The per-REPL step timeout
+        is raised to cover the diagnostic and restored to the 10s default after.
+        """
+        self._set_step_timeout(repl_id, int(timeout_secs))
+        try:
+            env = self.step(
+                repl_id, isar=command, timeout_seconds=float(timeout_secs) + 30.0
+            )
+        finally:
+            self._set_step_timeout(repl_id, 10)
+        if env["ok"]:
+            self._send_command(f'Ir.back "{_ml_escape(repl_id)}";')
+            try:
+                self._read_response(timeout_seconds=10.0)
+            except (ConnectionError, socket.timeout, BrokenPipeError):
+                pass
+        return env
+
 
 # -----------------------------------------------------------------------------
 # Response interpretation helpers.
