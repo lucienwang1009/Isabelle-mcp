@@ -19,53 +19,30 @@ import logging
 import os
 import secrets
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from isabelle_mcp import parsing
+from isabelle_mcp import metrics, parsing
 from isabelle_mcp.errors import ToolError, clamp_timeout, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.ir_daemon import IRDaemonHandle, launch_ir_daemon
+from isabelle_mcp.lifecycle_ops import AutomationMixin, FileOpsMixin
+from isabelle_mcp.textutil import strip_timing as _strip_timing
+from isabelle_mcp.textutil import truncate as _truncate
+from isabelle_mcp.textutil import state_at_end_of_proof as _state_at_end_of_proof
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["IRManager"]
 
-_DEFAULT_MAX_PREVIEW_CHARS = 4000
 
+class IRManager(AutomationMixin, FileOpsMixin):
+    """Owns the I/R daemon and maps opaque repl_ids to internal handles.
 
-def _max_preview_chars() -> int:
-    raw = os.environ.get("ISABELLE_MCP_MAX_PREVIEW_CHARS")
-    if raw:
-        try:
-            return max(0, int(raw))
-        except ValueError:
-            logger.warning("invalid ISABELLE_MCP_MAX_PREVIEW_CHARS=%r; using default", raw)
-    return _DEFAULT_MAX_PREVIEW_CHARS
-
-
-def _strip_timing(body: str) -> str:
-    """Drop I/R's trailing ``[timing] Ns`` lines from a response body."""
-    lines = [ln for ln in body.split("\n") if not ln.startswith("[timing]")]
-    return "\n".join(lines).rstrip("\n")
-
-
-def _truncate(text: str) -> str:
-    limit = _max_preview_chars()
-    if limit and len(text) > limit:
-        return text[:limit] + "\n… [truncated; use isabelle_state for full output]"
-    return text
-
-
-def _state_at_end_of_proof(body: str) -> bool:
-    """True when a state body shows no open proof (no remaining goals)."""
-    if "subgoal" in body and "goal (" in body:
-        return False
-    return not body.lstrip().startswith("proof (")
-
-
-class IRManager:
-    """Owns the I/R daemon and maps opaque repl_ids to internal handles."""
+    Layer C automation and Layer A file/orchestration operations are provided by
+    :class:`AutomationMixin` / :class:`FileOpsMixin` (see ``lifecycle_ops``).
+    """
 
     def __init__(
         self,
@@ -85,7 +62,15 @@ class IRManager:
         self._startup_timeout = startup_timeout_seconds
         self._handle: IRDaemonHandle | None = None
         self._registry: dict[str, str] = {}  # opaque uuid -> internal id
+        self._last_access: dict[str, float] = {}  # opaque uuid -> monotonic ts
         self._lock = threading.Lock()
+        ttl_raw = os.environ.get("ISABELLE_MCP_REPL_TTL_S", "1800")
+        try:
+            self._ttl = float(ttl_raw)
+        except ValueError:
+            self._ttl = 1800.0
+        self._reaper_stop = threading.Event()
+        self._reaper_thread: threading.Thread | None = None
 
     # --- daemon lifecycle ----------------------------------------------------
 
@@ -103,20 +88,82 @@ class IRManager:
                 bash_server=self._bash_server,
                 startup_timeout_seconds=self._startup_timeout,
             )
+        self._start_reaper()
 
     def close(self) -> None:
-        """Terminate the daemon and drop the registry."""
+        """Terminate the daemon, stop the reaper, and drop the registry."""
+        self._reaper_stop.set()
+        reaper = self._reaper_thread
+        if reaper is not None and reaper.is_alive():
+            reaper.join(timeout=2.0)
         with self._lock:
             handle, self._handle = self._handle, None
             self._registry.clear()
+            self._last_access.clear()
         if handle is not None:
             handle.terminate()
 
+    def _ensure_alive(self) -> None:
+        """(Re)start the daemon if it is not running; invalidate ids on crash."""
+        handle = self._handle
+        if handle is not None and handle.process.poll() is None:
+            return
+        crashed = handle is not None
+        with self._lock:
+            self._registry.clear()
+            self._last_access.clear()
+        if crashed:
+            metrics.increment("ir_restarts")
+            logger.warning("I/R daemon died; restarting and invalidating repl_ids")
+        try:
+            self.start()
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError("ir_unavailable", f"I/R daemon unavailable: {exc}") from exc
+
     def _require_handle(self) -> IRDaemonHandle:
+        self._ensure_alive()
         handle = self._handle
         if handle is None or handle.process.poll() is not None:
             raise ToolError("ir_unavailable", "I/R daemon is not running")
         return handle
+
+    # --- idle-REPL reaper ----------------------------------------------------
+
+    def _start_reaper(self) -> None:
+        if self._ttl <= 0:
+            return
+        if self._reaper_thread is not None and self._reaper_thread.is_alive():
+            return
+        self._reaper_stop.clear()
+        thread = threading.Thread(
+            target=self._reap_loop, name="ir-repl-reaper", daemon=True
+        )
+        self._reaper_thread = thread
+        thread.start()
+
+    def _reap_loop(self) -> None:
+        interval = min(60.0, max(1.0, self._ttl / 2))
+        while not self._reaper_stop.wait(interval):
+            try:
+                self._reap_once()
+            except Exception:  # noqa: BLE001
+                logger.exception("idle-REPL reaper error")
+
+    def _reap_once(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            stale = [
+                uuid
+                for uuid, ts in self._last_access.items()
+                if now - ts > self._ttl
+            ]
+        for uuid in stale:
+            try:
+                self.close_repl(uuid)
+                metrics.increment("repls_reaped")
+                logger.info("reaped idle repl %s", uuid)
+            except ToolError:
+                pass
 
     @contextlib.contextmanager
     def _session(self) -> Iterator[IRSession]:
@@ -131,6 +178,8 @@ class IRManager:
     def _resolve(self, repl_id: str) -> str:
         with self._lock:
             internal = self._registry.get(repl_id)
+            if internal is not None:
+                self._last_access[repl_id] = time.monotonic()
         if internal is None:
             raise ToolError("repl_not_found", f"unknown repl_id {repl_id!r}")
         return internal
@@ -165,6 +214,8 @@ class IRManager:
 
         with self._lock:
             self._registry[new_uuid] = internal
+            self._last_access[new_uuid] = time.monotonic()
+        metrics.increment("repls_opened")
         result: dict[str, object] = {"repl_id": new_uuid}
         if summary:
             result["goal_summary"] = _truncate(summary)
@@ -227,171 +278,5 @@ class IRManager:
             session.remove(internal)
         with self._lock:
             self._registry.pop(repl_id, None)
+            self._last_access.pop(repl_id, None)
         return {}
-
-    # --- Layer C (automation) ------------------------------------------------
-
-    def _diagnostic(self, repl_id: str, command: str, timeout_seconds: float) -> str:
-        """Run a diagnostic Isar command and return its raw body (raises on error)."""
-        timeout_seconds = clamp_timeout(timeout_seconds)
-        internal = self._resolve(repl_id)
-        with self._session() as session:
-            env = session.run_diagnostic(
-                internal, command=command, timeout_secs=int(timeout_seconds)
-            )
-        if not env["ok"]:
-            raise ToolError(map_ir_error(env["body"]), env["body"])
-        return env["body"]
-
-    def try0(self, repl_id: str, *, timeout_seconds: float = 10.0) -> dict[str, object]:
-        """Try standard tactics on the current goal. Returns ``{found, tactic?, output}``."""
-        body = self._diagnostic(repl_id, "try0", timeout_seconds)
-        parsed = parsing.parse_try0(body)
-        return {
-            "found": parsed["found"],
-            "tactic": parsed["tactic"],
-            "output": _truncate(parsed["output"]),
-        }
-
-    def sledgehammer(
-        self, repl_id: str, *, timeout_seconds: float = 120.0
-    ) -> dict[str, object]:
-        """Run sledgehammer. Returns ``{found, one_liner?, suggestions, output}``."""
-        timeout_seconds = clamp_timeout(timeout_seconds)
-        internal = self._resolve(repl_id)
-        with self._session() as session:
-            env = session.sledgehammer(internal, timeout_secs=int(timeout_seconds))
-        if not env["ok"]:
-            raise ToolError(map_ir_error(env["body"]), env["body"])
-        parsed = parsing.parse_sledgehammer(env["body"])
-        return {
-            "found": parsed["found"],
-            "one_liner": parsed["one_liner"],
-            "suggestions": parsed["suggestions"],
-            "output": _truncate(parsed["output"]),
-        }
-
-    def find_theorems(
-        self, repl_id: str, *, query: str, max_results: int = 20
-    ) -> dict[str, object]:
-        """Search the theorem database. Returns ``{count, theorems}``."""
-        internal = self._resolve(repl_id)
-        with self._session() as session:
-            env = session.find_theorems(
-                internal, query=query, max_results=max_results
-            )
-        if not env["ok"]:
-            raise ToolError(map_ir_error(env["body"]), env["body"])
-        parsed = parsing.parse_find_theorems(env["body"])
-        return {"count": parsed["count"], "theorems": parsed["theorems"]}
-
-    def nitpick(
-        self, repl_id: str, *, timeout_seconds: float = 30.0
-    ) -> dict[str, object]:
-        """Look for a counterexample. Returns ``{result, output}``."""
-        body = self._diagnostic(repl_id, "nitpick", timeout_seconds)
-        parsed = parsing.parse_nitpick(body)
-        return {"result": parsed["result"], "output": _truncate(parsed["output"])}
-
-    def quickcheck(
-        self, repl_id: str, *, timeout_seconds: float = 10.0
-    ) -> dict[str, object]:
-        """Randomized counterexample search. Returns ``{found_counterexample, output}``."""
-        body = self._diagnostic(repl_id, "quickcheck", timeout_seconds)
-        parsed = parsing.parse_quickcheck(body)
-        return {
-            "found_counterexample": parsed["found_counterexample"],
-            "output": _truncate(parsed["output"]),
-        }
-
-    def thm_deps(
-        self, name: str, repl_id: str, *, timeout_seconds: float = 30.0
-    ) -> dict[str, object]:
-        """List the axioms/theorems a named theorem depends on. ``{dependencies}``."""
-        body = self._diagnostic(repl_id, f"thm_deps {name}", timeout_seconds)
-        parsed = parsing.parse_thm_deps(body)
-        return {"dependencies": parsed["dependencies"]}
-
-    # --- Layer A (orchestration over Layer B) --------------------------------
-
-    def run_code(
-        self, code: str, *, timeout_seconds: float = 30.0
-    ) -> dict[str, object]:
-        """Run one Isar/HOL command in a fresh transient REPL on ``Main``.
-
-        Returns ``{output, at_end_of_proof}``; raises ToolError on failure. The
-        transient REPL is removed afterward (no registry entry).
-        """
-        timeout_seconds = clamp_timeout(timeout_seconds)
-        internal = f"mcp_run_{secrets.token_hex(6)}"
-        with self._session() as session:
-            session.init(repl_id=internal, theories=["Main"])
-            session._set_step_timeout(internal, int(timeout_seconds))
-            try:
-                env = session.step(
-                    internal, isar=code, timeout_seconds=float(timeout_seconds) + 10.0
-                )
-            finally:
-                session.remove(internal)
-        if not env["ok"]:
-            raise ToolError(map_ir_error(env["body"]), env["body"])
-        return {
-            "output": _truncate(_strip_timing(env["body"])),
-            "at_end_of_proof": proof_closed(env),
-        }
-
-    def multi_attempt(
-        self, repl_id: str, tactics: list[str], *, timeout_seconds: float = 15.0
-    ) -> dict[str, object]:
-        """Try each tactic on a fork of the open-proof REPL; report outcomes.
-
-        The original REPL is untouched. Each attempt forks, steps the tactic on
-        the throwaway fork, records the outcome, and removes the fork.
-        """
-        timeout_seconds = clamp_timeout(timeout_seconds)
-        internal = self._resolve(repl_id)
-        attempts: list[dict[str, object]] = []
-        with self._session() as session:
-            for tactic in tactics:
-                fork_id = f"{internal}_ma_{secrets.token_hex(4)}"
-                fork_env = session.fork(internal, fork_id)
-                if not fork_env["ok"]:
-                    attempts.append(
-                        {
-                            "tactic": tactic,
-                            "ok": False,
-                            "error_code": map_ir_error(fork_env["body"]),
-                            "error": _truncate(fork_env["body"]),
-                        }
-                    )
-                    continue
-                try:
-                    session._set_step_timeout(fork_id, int(timeout_seconds))
-                    env = session.step(
-                        fork_id,
-                        isar=tactic,
-                        timeout_seconds=float(timeout_seconds) + 10.0,
-                    )
-                finally:
-                    session.remove(fork_id)
-                if env["ok"]:
-                    goals = parsing.parse_goal_state(env["body"])
-                    attempts.append(
-                        {
-                            "tactic": tactic,
-                            "ok": True,
-                            "closes_goal": proof_closed(env),
-                            "remaining_goals": goals["goal_count"],
-                            "goal_preview": _truncate(_strip_timing(env["body"])),
-                        }
-                    )
-                else:
-                    attempts.append(
-                        {
-                            "tactic": tactic,
-                            "ok": False,
-                            "error_code": map_ir_error(env["body"]),
-                            "error": _truncate(env["body"]),
-                        }
-                    )
-        return {"attempts": attempts}

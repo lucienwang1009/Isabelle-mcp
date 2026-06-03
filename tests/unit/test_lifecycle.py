@@ -60,6 +60,30 @@ def manager_with_fake() -> tuple[IRManager, FakeSession]:
     return mgr, fake
 
 
+def test_idle_reaper_closes_stale_repls(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    mgr = IRManager(isabelle_bin="/nonexistent", ir_dir=Path("/nonexistent"))
+    mgr._ttl = 0.01  # tiny TTL for the test
+    fake = FakeSession()
+
+    @contextlib.contextmanager
+    def _fake_session() -> Iterator[FakeSession]:
+        yield fake
+
+    mgr._session = _fake_session  # type: ignore[assignment,method-assign]
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    internal = f"mcp_{repl_id}"
+    # Force the REPL to look idle, then run one reaper pass.
+    mgr._last_access[repl_id] = time.monotonic() - 100.0
+    mgr._reap_once()
+
+    assert internal in fake.removed
+    with pytest.raises(ToolError) as exc:
+        mgr.state(repl_id)
+    assert exc.value.code == "repl_not_found"
+
+
 def test_open_issues_opaque_id_mapped_to_internal(
     manager_with_fake: tuple[IRManager, FakeSession],
 ) -> None:
