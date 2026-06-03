@@ -11,6 +11,7 @@ from typing import Any
 
 __all__ = [
     "parse_find_theorems",
+    "parse_goal_state",
     "parse_nitpick",
     "parse_quickcheck",
     "parse_sledgehammer",
@@ -25,6 +26,8 @@ _STATE_START = re.compile(r"^(proof \(|goal \(\d+ subgoal)")
 _TRY_THIS = re.compile(r"Try this:\s*(.+)")
 _TRAILING_MS = re.compile(r"\s*\(\d[^()]*ms\)\s*$")
 _THEOREM_COUNT = re.compile(r"(\d+)\s+theorem")
+_GOAL_HEADER = re.compile(r"goal \((\d+) subgoals?\):")
+_SUBGOAL_SPLIT = re.compile(r"(?m)^ *\d+\. ")
 
 
 def strip_trailing_state(body: str) -> str:
@@ -97,6 +100,24 @@ def parse_find_theorems(body: str) -> dict[str, Any]:
     match = _THEOREM_COUNT.search(tally)
     count = int(match.group(1)) if match else len(rest)
     return {"count": count, "theorems": rest}
+
+
+def parse_goal_state(body: str) -> dict[str, Any]:
+    """Parse a pretty proof state into ``{goal_count, subgoals}``.
+
+    Returns ``goal_count == 0`` and an empty list when no open subgoals are
+    shown (e.g. the proof just closed and the body is a ``theorem`` line).
+    """
+    header = _GOAL_HEADER.search(body)
+    if not header:
+        return {"goal_count": 0, "subgoals": []}
+    count = int(header.group(1))
+    tail = body[header.end() :]
+    # Drop the trailing "[timing] Ns" line, if present.
+    tail = tail.split("\n[timing]")[0]
+    parts = _SUBGOAL_SPLIT.split(tail)[1:]  # parts[0] is the bit before "1. "
+    subgoals = [re.sub(r"\s+", " ", p).strip() for p in parts if p.strip()]
+    return {"goal_count": count, "subgoals": subgoals}
 
 
 def parse_thm_deps(body: str) -> dict[str, Any]:
