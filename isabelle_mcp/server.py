@@ -76,7 +76,20 @@ def build_server(manager: IRManager | None = None) -> FastMCP:
     register_layer_a(mcp, target)
     register_layer_b(mcp, target)
     register_layer_c(mcp, target)
+    _apply_disabled_tools(mcp)
     return mcp
+
+
+def _apply_disabled_tools(mcp: FastMCP) -> None:
+    """Unregister tools named in ``ISABELLE_MCP_DISABLED_TOOLS`` (comma-separated)."""
+    raw = os.environ.get("ISABELLE_MCP_DISABLED_TOOLS", "")
+    disabled = {name.strip() for name in raw.split(",") if name.strip()}
+    for name in disabled:
+        try:
+            mcp.remove_tool(name)
+            logger.info("disabled tool %s", name)
+        except Exception:  # noqa: BLE001 - tolerate unknown names
+            logger.warning("cannot disable unknown tool %s", name)
 
 
 def main() -> None:

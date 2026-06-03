@@ -8,15 +8,31 @@ The ``code`` values are stable so an LLM can branch on them (design spec §6).
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 __all__ = [
     "ERROR_HINTS",
     "ToolError",
+    "clamp_timeout",
     "error_envelope",
     "map_ir_error",
     "ok",
 ]
+
+_DEFAULT_MAX_TIMEOUT_S = 600.0
+
+
+def clamp_timeout(requested: float) -> float:
+    """Clamp a per-call timeout to ``[1, ISABELLE_MCP_MAX_TIMEOUT_S]`` (default 600)."""
+    ceiling = _DEFAULT_MAX_TIMEOUT_S
+    raw = os.environ.get("ISABELLE_MCP_MAX_TIMEOUT_S")
+    if raw:
+        try:
+            ceiling = float(raw)
+        except ValueError:
+            pass
+    return max(1.0, min(float(requested), ceiling))
 
 # Stable error codes the LLM can branch on (design spec §6).
 ERROR_HINTS: dict[str, list[str]] = {

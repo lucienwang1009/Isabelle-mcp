@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from isabelle_mcp.server import build_server
 
 _EXPECTED = {
@@ -29,3 +31,11 @@ def test_build_server_loads_skill_instructions() -> None:
     assert "isabelle-mcp" in mcp.instructions
     # Frontmatter must be stripped (no leading YAML marker).
     assert not mcp.instructions.lstrip().startswith("---")
+
+
+def test_disabled_tools_are_unregistered(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ISABELLE_MCP_DISABLED_TOOLS", "isabelle_nitpick, isabelle_run_code")
+    names = {t.name for t in asyncio.run(build_server().list_tools())}
+    assert "isabelle_nitpick" not in names
+    assert "isabelle_run_code" not in names
+    assert "isabelle_step" in names

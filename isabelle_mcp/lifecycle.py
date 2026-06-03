@@ -23,7 +23,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from isabelle_mcp import parsing
-from isabelle_mcp.errors import ToolError, map_ir_error
+from isabelle_mcp.errors import ToolError, clamp_timeout, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.ir_daemon import IRDaemonHandle, launch_ir_daemon
 
@@ -174,6 +174,7 @@ class IRManager:
         self, repl_id: str, isar: str, *, timeout_seconds: float = 60.0
     ) -> dict[str, object]:
         """Run one Isar step. Returns ``{"output", "at_end_of_proof"}``."""
+        timeout_seconds = clamp_timeout(timeout_seconds)
         internal = self._resolve(repl_id)
         with self._session() as session:
             env = session.step(internal, isar=isar, timeout_seconds=timeout_seconds)
@@ -232,6 +233,7 @@ class IRManager:
 
     def _diagnostic(self, repl_id: str, command: str, timeout_seconds: float) -> str:
         """Run a diagnostic Isar command and return its raw body (raises on error)."""
+        timeout_seconds = clamp_timeout(timeout_seconds)
         internal = self._resolve(repl_id)
         with self._session() as session:
             env = session.run_diagnostic(
@@ -255,6 +257,7 @@ class IRManager:
         self, repl_id: str, *, timeout_seconds: float = 120.0
     ) -> dict[str, object]:
         """Run sledgehammer. Returns ``{found, one_liner?, suggestions, output}``."""
+        timeout_seconds = clamp_timeout(timeout_seconds)
         internal = self._resolve(repl_id)
         with self._session() as session:
             env = session.sledgehammer(internal, timeout_secs=int(timeout_seconds))
@@ -319,6 +322,7 @@ class IRManager:
         Returns ``{output, at_end_of_proof}``; raises ToolError on failure. The
         transient REPL is removed afterward (no registry entry).
         """
+        timeout_seconds = clamp_timeout(timeout_seconds)
         internal = f"mcp_run_{secrets.token_hex(6)}"
         with self._session() as session:
             session.init(repl_id=internal, theories=["Main"])
@@ -344,6 +348,7 @@ class IRManager:
         The original REPL is untouched. Each attempt forks, steps the tactic on
         the throwaway fork, records the outcome, and removes the fork.
         """
+        timeout_seconds = clamp_timeout(timeout_seconds)
         internal = self._resolve(repl_id)
         attempts: list[dict[str, object]] = []
         with self._session() as session:
