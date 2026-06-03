@@ -26,3 +26,4 @@ heaps/
 .env
 *.log
 .claude/
+.serena/
