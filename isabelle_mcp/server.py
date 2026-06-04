@@ -13,6 +13,7 @@ from mcp.server.fastmcp import FastMCP
 
 from isabelle_mcp.lifecycle import IRManager
 from isabelle_mcp.logging import configure_logging
+from isabelle_mcp.resources import register_resources
 from isabelle_mcp.tools.layer_a import register_layer_a
 from isabelle_mcp.tools.layer_b import register_layer_b
 from isabelle_mcp.tools.layer_c import register_layer_c
@@ -78,6 +79,7 @@ def build_server(manager: IRManager | None = None) -> FastMCP:
     register_layer_a(mcp, target)
     register_layer_b(mcp, target)
     register_layer_c(mcp, target)
+    register_resources(mcp)
     _apply_disabled_tools(mcp)
     return mcp
 

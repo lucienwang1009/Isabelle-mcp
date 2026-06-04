@@ -1,0 +1,97 @@
+# Searching for lemmas — `find_theorems` and the AFP
+
+The single biggest win in Isabelle proving is **reusing existing lemmas**. Search
+before you write tactics.
+
+## `isabelle_find_theorems` (in-session search)
+
+Searches the theories currently loaded in your REPL session. Query forms (combine
+them — they AND together):
+
+| Query | Finds |
+|---|---|
+| `"_ + _ = _ + _"` | Lemmas whose conclusion matches the pattern (`_` = wildcard). |
+| `name: comm` | Lemmas whose name contains `comm`. |
+| `"comm" intro` | Lemmas usable as introduction rules about that pattern. |
+| `simp: "_ mod _"` | Simp rules rewriting `_ mod _`. |
+| `dest: "_ ∈ set _"` | Destruction rules. |
+| `(100) "_ ≤ _"` | Cap results at 100. |
+
+Workflow: find a candidate, then cite it — `by (simp add: foo)`,
+`by (metis foo bar)`, or `apply (rule foo)`.
+
+Tips:
+- Search by the **shape of your goal**, not by English. Pattern queries on the
+  goal's conclusion are the most productive.
+- Combine a pattern with `name:` to narrow a flooded result set.
+- `find_consts` (via `isabelle_run_code` if needed) locates a constant when you
+  don't know its exact name.
+
+## The Archive of Formal Proofs (AFP)
+
+The AFP (<https://www.isa-afp.org/>) is Isabelle's large peer-reviewed library —
+the analogue of Lean's mathlib. If a result is more advanced than core `HOL`
+(number theory, analysis, algebra, automata, complexity, crypto, …), it likely
+lives in an AFP **entry** (a named session).
+
+### Browsing / discovering entries
+
+- Topic index: <https://www.isa-afp.org/topics/> — browse by area.
+- Full-text search: <https://www.isa-afp.org/search/> — search statements/names.
+- Each entry page lists its session name, theories, and dependencies.
+
+Examples of entries that come up in CS theory work:
+
+| Topic | AFP entry (session) |
+|---|---|
+| Cook–Levin theorem / SAT NP-completeness | `Cook_Levin` |
+| Propositional/Resolution proof systems | `Propositional_Proof_Systems` |
+| Regular languages / automata | `Regular-Sets`, `Functional_Automata` |
+| Graph theory | `Graph_Theory` |
+
+(Always confirm the exact session name on the entry's AFP page.)
+
+### Using an AFP entry from a theory
+
+1. Download the AFP and register it as an Isabelle component (once):
+
+   ```bash
+   isabelle components -u /path/to/afp/thys
+   ```
+
+2. Import the entry's theory with the `Session.Theory` syntax:
+
+   ```isabelle
+   theory My_Work
+     imports "Cook_Levin.Satisfiability"
+   begin
+   ```
+
+3. In a `ROOT` file, declare the dependency so the session builds:
+
+   ```
+   session My_Session = Cook_Levin +
+     theories My_Work
+   ```
+
+### Reaching AFP lemmas from this MCP server (current limitation)
+
+`isabelle_find_theorems` and `isabelle_sledgehammer` only see theories loaded in
+the **current session image**. The default session is `HOL`, which does **not**
+include the AFP. To search/cite AFP lemmas:
+
+- Set `ISABELLE_MCP_SESSION` to a session image that imports the entry you need
+  (the image must be built first with `isabelle build`), **or**
+- open the REPL on a session that already depends on the AFP entry.
+
+Building AFP-backed session images and pointing the server at them is the planned
+**AFP-integration** milestone; until then, treat the AFP as a *reference* you
+read to find the right lemma name, then reproduce or import that lemma in a
+session the server can load.
+
+## Reality check on hard targets
+
+Big theorems (e.g. proving 3-SAT is NP-complete via Cook–Levin) are **not**
+something the tactic cascade closes autonomously. The realistic path is: find the
+relevant AFP entry, build/load a session that includes it, and *navigate and
+extend* the existing formalization — not derive it from scratch with sledgehammer.

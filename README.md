@@ -54,7 +54,21 @@ Tools advertised:
   `isabelle_find_theorems`, `isabelle_nitpick`, `isabelle_quickcheck`
   (+ `isabelle_thm_deps` when `ISABELLE_MCP_EXPOSE_ADVANCED=1`).
 
-The proving-loop SKILL is served as the MCP `instructions` preamble.
+The proving-loop SKILL is served as the MCP `instructions` preamble, and a set of
+deeper reference docs are exposed as on-demand MCP **resources** (progressive
+disclosure, modelled on [lean4-skills](https://github.com/cameronfreer/lean4-skills)):
+
+| Resource URI | Topic |
+|---|---|
+| `skill://isabelle/tactics` | Tactic catalog + when to use each |
+| `skill://isabelle/isar-patterns` | Structured Isar: induction, cases, calc, obtain |
+| `skill://isabelle/sledgehammer` | Driving sledgehammer + applying its output |
+| `skill://isabelle/afp-and-search` | `find_theorems` and using the **AFP** as a library |
+| `skill://isabelle/counterexamples` | nitpick/quickcheck falsification workflow |
+| `skill://isabelle/errors` | Mapping `error.code` to a concrete fix |
+
+Source for all of these lives under `isabelle_mcp/skills/` (`isabelle-proving.md`
+plus `references/*.md`).
 
 ### Transports
 
