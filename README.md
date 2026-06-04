@@ -64,6 +64,7 @@ disclosure, modelled on [lean4-skills](https://github.com/cameronfreer/lean4-ski
 | `skill://isabelle/isar-patterns` | Structured Isar: induction, cases, calc, obtain |
 | `skill://isabelle/sledgehammer` | Driving sledgehammer + applying its output |
 | `skill://isabelle/afp-and-search` | `find_theorems` and using the **AFP** as a library |
+| `skill://isabelle/afp-setup` | Download/build the AFP and point the server at a heap |
 | `skill://isabelle/counterexamples` | nitpick/quickcheck falsification workflow |
 | `skill://isabelle/errors` | Mapping `error.code` to a concrete fix |
 

@@ -15,6 +15,7 @@ _EXPECTED_URIS = {
     "skill://isabelle/isar-patterns",
     "skill://isabelle/sledgehammer",
     "skill://isabelle/afp-and-search",
+    "skill://isabelle/afp-setup",
     "skill://isabelle/counterexamples",
     "skill://isabelle/errors",
 }
@@ -40,6 +41,14 @@ def test_afp_resource_mentions_archive_of_formal_proofs() -> None:
     assert "Archive of Formal Proofs" in body
     assert "isabelle components" in body  # AFP install command is documented
     assert "Cook_Levin" in body
+
+
+def test_afp_setup_resource_documents_build_workflow() -> None:
+    mcp = build_server()
+    contents = asyncio.run(mcp.read_resource("skill://isabelle/afp-setup"))
+    body = list(contents)[0].content
+    assert "isabelle build -b" in body  # heap build command
+    assert "ISABELLE_MCP_SESSION" in body  # how to point the server at it
 
 
 def test_register_resources_counts_files() -> None:

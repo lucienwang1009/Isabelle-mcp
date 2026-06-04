@@ -28,6 +28,7 @@ REFERENCE_TITLES: dict[str, str] = {
     "isar-patterns": "Structured Isar proof patterns",
     "sledgehammer": "Driving sledgehammer",
     "afp-and-search": "Searching for lemmas (find_theorems + the AFP)",
+    "afp-setup": "Setting up the AFP: download, build, point the server",
     "counterexamples": "Falsifying goals: nitpick and quickcheck",
     "errors": "Error codes and recovery",
 }

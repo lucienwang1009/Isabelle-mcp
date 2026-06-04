@@ -84,10 +84,10 @@ include the AFP. To search/cite AFP lemmas:
   (the image must be built first with `isabelle build`), **or**
 - open the REPL on a session that already depends on the AFP entry.
 
-Building AFP-backed session images and pointing the server at them is the planned
-**AFP-integration** milestone; until then, treat the AFP as a *reference* you
-read to find the right lemma name, then reproduce or import that lemma in a
-session the server can load.
+For the full download → build → `ISABELLE_MCP_SESSION` workflow (and the
+discovery-vs-availability distinction), see `skill://isabelle/afp-setup`. Until a
+heap is built, treat the AFP as a *reference* you read to find the right lemma
+name, then reproduce or import that lemma in a session the server can load.
 
 ## Reality check on hard targets
 

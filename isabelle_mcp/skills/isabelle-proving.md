@@ -119,6 +119,7 @@ A proof is done when:
 | `skill://isabelle/isar-patterns` | Writing structured proofs: induction, cases, calc, obtain. |
 | `skill://isabelle/sledgehammer` | Driving sledgehammer well and applying its output. |
 | `skill://isabelle/afp-and-search` | Finding lemmas; using the **AFP** as a library. |
+| `skill://isabelle/afp-setup` | Download/build the AFP and point the server at it. |
 | `skill://isabelle/counterexamples` | nitpick/quickcheck workflow and reading output. |
 | `skill://isabelle/errors` | Mapping `error.code` to a concrete fix. |
 
