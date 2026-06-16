@@ -24,6 +24,7 @@ heaps/
 
 # Local
 .env
+.mcp.json
 *.log
 .claude/
 .serena/
