@@ -1,11 +1,11 @@
 [project]
 name = "isabelle-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server exposing Isabelle/HOL to general-purpose LLMs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = []
+authors = [{ name = "lucienwang1009", email = "yhwang1009@hotmail.com" }]
 keywords = ["isabelle", "mcp", "llm", "theorem-proving", "hol"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -23,8 +23,9 @@ dependencies = [
 isabelle-mcp = "isabelle_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/"
-Issues = "https://github.com/"
+Homepage = "https://github.com/lucienwang1009/Isabelle-mcp"
+Repository = "https://github.com/lucienwang1009/Isabelle-mcp"
+Issues = "https://github.com/lucienwang1009/Isabelle-mcp/issues"
 
 [build-system]
 requires = ["hatchling"]

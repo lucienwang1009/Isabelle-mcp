@@ -2,7 +2,7 @@
 
 MCP server exposing Isabelle/HOL to general-purpose LLMs (Claude, GPT) for autonomous theorem proving.
 
-Status: **0.1 (beta).** Layer A/B/C tools over stdio or HTTP, with sandboxing,
+Status: **0.2 (beta).** Layer A/B/C tools over stdio or HTTP, with sandboxing,
 crash recovery, idle-REPL cleanup, structured logging, and metrics. See
 [`docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md`](docs/superpowers/specs/2026-05-28-isabelle-mcp-design.md)
 for the design and `docs/superpowers/plans/` for the milestone history.
@@ -14,21 +14,33 @@ for the design and `docs/superpowers/plans/` for the milestone history.
 - Layer A (file-anchored), Layer B (REPL/snapshot), Layer C (automation) tool surface.
 - Bundled SKILL guides LLMs through the standard proving loop.
 
-## Quick start
+## Install
 
-> The server exposes Layer A (file/utility), Layer B (REPL) and Layer C
-> (automation) tools. Position-anchored `goal_at`/`diagnostics` and `hover`
-> remain deferred (I/R strips PIDE markup to plain text — see the M3 plan).
+> **Install from source — not from PyPI.** The server shells out to the vendored
+> I/R subprocess (`vendor/AutoCorrode/ir/`), which is not part of the importable
+> Python package, so a bare `pip`/`uvx` wheel install will not run. Clone with
+> submodules and run via `uv`. (The package named `isabelle-mcp` *on PyPI* is an
+> unrelated project — do **not** `uvx isabelle-mcp`.)
 
-**Prerequisites:** Isabelle 2025-2 with a prebuilt HOL image, `uv`, and the
-vendored submodule. See [`docs/m0-setup.md`](docs/m0-setup.md).
+**Prerequisites:** Isabelle 2025-2 with a prebuilt HOL image and `uv`.
+See [`docs/m0-setup.md`](docs/m0-setup.md).
 
 ```bash
-git submodule update --init --recursive
+git clone --recurse-submodules https://github.com/lucienwang1009/Isabelle-mcp.git
+cd Isabelle-mcp
 uv sync
 export ISABELLE_HOME=/path/to/Isabelle2025-2(.app)   # dir containing bin/isabelle
 uv run isabelle-mcp                                   # serves MCP over stdio
 ```
+
+> Already cloned without `--recurse-submodules`? Run
+> `git submodule update --init --recursive`.
+
+## Quick start
+
+The server exposes Layer A (file/utility), Layer B (REPL) and Layer C
+(automation) tools. Position-anchored `goal_at`/`diagnostics` and `hover`
+remain deferred (I/R strips PIDE markup to plain text — see the M3 plan).
 
 Register it with an MCP client (e.g. Claude Code `.mcp.json`):
 
