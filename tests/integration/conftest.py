@@ -18,6 +18,7 @@ import pytest
 from isabelle_mcp.ir_client import IRDaemonHandle, launch_ir_daemon
 
 logger = logging.getLogger(__name__)
+_SESSION_DAEMON_PORT = 9159
 
 
 @pytest.fixture(scope="session")
@@ -39,6 +40,12 @@ def isabelle_bin() -> str:
     found = shutil.which("isabelle")
     if found:
         return found
+    for candidate in (
+        Path("/Applications/Isabelle2025-2.app/bin/isabelle"),
+        Path.home() / "Isabelle2025-2" / "bin" / "isabelle",
+    ):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
     pytest.skip(
         "isabelle binary not found; export ISABELLE_HOME=<install-root> "
         "or add isabelle to PATH"
@@ -102,6 +109,7 @@ def ir_daemon(
         isabelle_bin=isabelle_bin,
         ir_dir=ir_dir,
         session="HOL",
+        port=_SESSION_DAEMON_PORT,
         startup_timeout_seconds=120.0,
     )
     try:

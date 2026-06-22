@@ -39,7 +39,13 @@ async def run_tool(
         return ok(**payload)
     except ToolError as exc:
         error_code = exc.code
-        return error_envelope(exc.code, exc.message, correlation_id, hint=exc.hint)
+        return error_envelope(
+            exc.code,
+            exc.message,
+            correlation_id,
+            hint=exc.hint,
+            server_event=exc.server_event,
+        )
     except Exception as exc:  # noqa: BLE001 - surfaced as an envelope, not raised
         error_code = "internal_error"
         logger.exception("unexpected error in tool", extra={"tool": tool})

@@ -48,7 +48,11 @@ def test_outline_handles_no_header() -> None:
 
 def test_parse_goal_state_single() -> None:
     parsed = parse_goal_state("proof (prove)\ngoal (1 subgoal):\n 1. 1 + 1 = 2\n[timing] 0s")
-    assert parsed == {"goal_count": 1, "subgoals": ["1 + 1 = 2"]}
+    assert parsed["goal_count"] == 1
+    assert parsed["subgoals"] == ["1 + 1 = 2"]
+    assert parsed["structured_subgoals"] == [
+        {"raw": "1 + 1 = 2", "hypotheses": [], "conclusion": "1 + 1 = 2"}
+    ]
 
 
 def test_parse_goal_state_multiple_and_multiline() -> None:
@@ -59,7 +63,19 @@ def test_parse_goal_state_multiple_and_multiline() -> None:
 
 
 def test_parse_goal_state_no_open_goals() -> None:
-    assert parse_goal_state("theorem t: 1 + 1 = 2\n[timing] 0s") == {
-        "goal_count": 0,
-        "subgoals": [],
-    }
+    parsed = parse_goal_state("theorem t: 1 + 1 = 2\n[timing] 0s")
+    assert parsed["goal_count"] == 0
+    assert parsed["subgoals"] == []
+    assert parsed["structured_subgoals"] == []
+
+
+def test_parse_goal_state_structures_hypotheses() -> None:
+    body = "goal (1 subgoal):\n 1. A x; B y ⟹ C x y\n[timing] 0s"
+    parsed = parse_goal_state(body)
+    assert parsed["structured_subgoals"] == [
+        {
+            "raw": "A x; B y ⟹ C x y",
+            "hypotheses": ["A x", "B y"],
+            "conclusion": "C x y",
+        }
+    ]

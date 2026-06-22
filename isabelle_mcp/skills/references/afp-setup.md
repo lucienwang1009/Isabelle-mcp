@@ -17,10 +17,24 @@ entry plus its transitive dependencies.
 
 ## 1. Download the sources (once)
 
-Get the AFP release **matching your Isabelle version** (e.g. AFP for
-Isabelle2025-2) from <https://www.isa-afp.org/download/> and unpack it, e.g. to
-`~/afp`. A version mismatch will not build. The sources are a moderate download;
-having them is enough for discovery (grep) with no build.
+For discovery through this MCP server, use the built-in bootstrap command. It
+downloads the current AFP source archive into `~/.cache/isabelle-mcp/afp`,
+extracts it, and builds the local SQLite source index:
+
+```bash
+uv run isabelle-mcp afp-bootstrap
+uv run isabelle-mcp afp-status
+```
+
+For a one-shot checkout setup, `bash scripts/bootstrap.sh --with-afp` performs
+the same optional AFP step. If you already have AFP sources, index them with
+`bash scripts/bootstrap.sh --afp-root /path/to/afp/thys` or
+`uv run isabelle-mcp afp-index --afp-root /path/to/afp/thys`.
+
+For proof availability, the AFP release must **match your Isabelle version**
+(e.g. AFP for Isabelle2025-2). If needed, get a versioned release from
+<https://www.isa-afp.org/download/> and unpack it, e.g. to `~/afp`. A version
+mismatch will not build.
 
 ## 2. Register it as a component (once)
 
@@ -90,7 +104,9 @@ ENV ISABELLE_MCP_SESSION=Cook_Levin
 
 You do **not** need a heap to find out what exists:
 
-- Grep the unpacked sources: `grep -rn "lemma .*satisfiab" ~/afp/thys/Cook_Levin/`
+- Use the source index: `uv run isabelle-mcp afp-search "finite automata"`.
+- Inside MCP, use `isabelle_afp_status()` then `isabelle_afp_search(query)`.
+- Grep the unpacked sources: `grep -rn "lemma .*satisfiab" ~/afp/thys/Cook_Levin/`.
 - `isabelle build -l` lists sessions; entry pages list theories/lemmas.
 - isa-afp.org full-text search.
 

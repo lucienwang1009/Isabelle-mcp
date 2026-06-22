@@ -30,11 +30,30 @@ git clone --recurse-submodules https://github.com/lucienwang1009/Isabelle-mcp.gi
 cd Isabelle-mcp
 uv sync
 export ISABELLE_HOME=/path/to/Isabelle2025-2(.app)   # dir containing bin/isabelle
+uv run isabelle-mcp doctor                            # verifies local prerequisites
 uv run isabelle-mcp                                   # serves MCP over stdio
 ```
 
 > Already cloned without `--recurse-submodules`? Run
 > `git submodule update --init --recursive`.
+
+For a one-shot local setup check, run:
+
+```bash
+bash scripts/bootstrap.sh
+```
+
+To also download the current AFP sources and build the local AFP source index:
+
+```bash
+bash scripts/bootstrap.sh --with-afp
+```
+
+If you already have AFP sources, reuse them without downloading:
+
+```bash
+bash scripts/bootstrap.sh --afp-root /path/to/afp/thys
+```
 
 ## Quick start
 
@@ -58,8 +77,9 @@ Register it with an MCP client (e.g. Claude Code `.mcp.json`):
 
 Tools advertised:
 
-- **Layer A (file/utility):** `isabelle_file_outline`, `isabelle_run_code`,
-  `isabelle_multi_attempt`.
+- **Layer A (file/utility):** `isabelle_file_outline`, `isabelle_check_file`,
+  `isabelle_check_project`, `isabelle_afp_search`, `isabelle_afp_status`,
+  `isabelle_run_code`, `isabelle_multi_attempt`.
 - **Layer B (REPL):** `isabelle_open_repl`, `isabelle_step`, `isabelle_undo`,
   `isabelle_state`, `isabelle_fork_repl`, `isabelle_close_repl`.
 - **Layer C (automation):** `isabelle_try0`, `isabelle_sledgehammer`,
@@ -100,8 +120,11 @@ is exposed under HTTP.
 | `ISABELLE_MCP_HOST` / `ISABELLE_MCP_PORT_HTTP` | HTTP bind (default 127.0.0.1:8000) |
 | `ISABELLE_MCP_NO_BASH_SERVER=1` | Disable sledgehammer's ATPs (faster start) |
 | `ISABELLE_MCP_EXPOSE_ADVANCED=1` | Expose `isabelle_thm_deps` |
+| `ISABELLE_MCP_ALLOW_ML=1` | Allow raw Isabelle/ML commands (`ML`, `ML_file`, `setup`, ...); disabled by default |
 | `ISABELLE_MCP_DISABLED_TOOLS` | Comma-separated tool names to hide |
 | `ISABELLE_MCP_ALLOWED_DIRS` | Extra roots for `file_outline` (path-separated) |
+| `ISABELLE_MCP_AFP_INDEX_DB` | Local AFP source index path (default `~/.cache/isabelle-mcp/afp-index.sqlite3`) |
+| `ISABELLE_MCP_BOOTSTRAP_AFP=1` | `scripts/bootstrap.sh` only: download/index AFP during one-shot setup |
 | `ISABELLE_MCP_MAX_TIMEOUT_S` | Per-call timeout ceiling (default 600) |
 | `ISABELLE_MCP_REPL_TTL_S` | Idle-REPL TTL before reaping (default 1800) |
 | `ISABELLE_MCP_MAX_PREVIEW_CHARS` | Output truncation (default 4000) |
@@ -117,10 +140,37 @@ docker build -t isabelle-mcp .
 docker run --rm -i isabelle-mcp           # stdio
 ```
 
+## AFP Source Index
+
+For AFP discovery without building AFP heaps, download the current AFP sources
+and build a local source index:
+
+```bash
+uv run isabelle-mcp afp-bootstrap
+uv run isabelle-mcp afp-status
+uv run isabelle-mcp afp-search "finite automata"
+```
+
+To index an existing AFP checkout instead:
+
+```bash
+uv run isabelle-mcp afp-index --afp-root /path/to/afp/thys
+uv run isabelle-mcp afp-search "finite automata"
+uv run isabelle-mcp afp-search "name:comm kind:lemma"
+```
+
+Inside MCP, use `isabelle_afp_status` to check readiness and
+`isabelle_afp_search` to search the source index.
+
+This index is a search aid only. A result becomes citable in real proofs only
+after the relevant AFP session/profile is built and used as
+`ISABELLE_MCP_SESSION`; confirm with `isabelle_find_theorems`.
+
 ## Development
 
 ```bash
 uv sync
+uv run ruff check .
 uv run pytest                              # unit tests run without Isabelle
 ISABELLE_HOME=/path/to/Isabelle2025-2.app uv run pytest   # + integration
 ```
@@ -129,3 +179,12 @@ Tests are marked `integration` (need Isabelle 2025-2 + HOL; auto-skip otherwise)
 and `heavy` (sledgehammer / the end-to-end auto-prover). The reproducible
 end-to-end harness lives at `scripts/e2e_autoprove.py` and closes ≥7/10 fixture
 lemmas via `try0`/`sledgehammer` with no LLM in the loop.
+
+For local Isabelle proof projects with a `ROOT` file, prefer the project-level
+checker over a plain REPL load:
+
+```text
+isabelle_check_project(root="examples/my_project")
+isabelle_check_file(path="examples/my_project/My_Project.thy",
+                    session="My_Project")
+```

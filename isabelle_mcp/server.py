@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -50,7 +51,15 @@ def _find_isabelle_bin() -> str:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
     found = shutil.which("isabelle")
-    return found or ""
+    if found:
+        return found
+    for candidate in (
+        Path("/Applications/Isabelle2025-2.app/bin/isabelle"),
+        Path.home() / "Isabelle2025-2" / "bin" / "isabelle",
+    ):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return ""
 
 
 def _ir_dir() -> Path:
@@ -96,12 +105,40 @@ def _apply_disabled_tools(mcp: FastMCP) -> None:
             logger.warning("cannot disable unknown tool %s", name)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """CLI entry point (pyproject [project.scripts] isabelle-mcp).
 
     Transport is chosen by ``ISABELLE_MCP_TRANSPORT`` (``stdio`` default; also
     ``sse`` / ``streamable-http``).
     """
+    args = sys.argv[1:] if argv is None else argv
+    if args and args[0] == "doctor":
+        from isabelle_mcp.doctor import main as doctor_main
+
+        raise SystemExit(doctor_main(args[1:]))
+    if args and args[0] == "afp-index":
+        from isabelle_mcp.afp_index import main_index
+
+        raise SystemExit(main_index(args[1:]))
+    if args and args[0] == "afp-bootstrap":
+        from isabelle_mcp.afp_index import main_bootstrap
+
+        raise SystemExit(main_bootstrap(args[1:]))
+    if args and args[0] == "afp-search":
+        from isabelle_mcp.afp_index import main_search
+
+        raise SystemExit(main_search(args[1:]))
+    if args and args[0] == "afp-status":
+        from isabelle_mcp.afp_index import main_status
+
+        raise SystemExit(main_status(args[1:]))
+    if args and args[0] in {"-h", "--help"}:
+        print(
+            "usage: isabelle-mcp [doctor|afp-bootstrap|afp-index|afp-search|afp-status]\n\n"
+            "Run without arguments to serve MCP."
+        )
+        raise SystemExit(0)
+
     configure_logging(os.environ.get("ISABELLE_MCP_LOG_LEVEL", "INFO"))
     transport = os.environ.get("ISABELLE_MCP_TRANSPORT", "stdio")
     manager = manager_from_env()

@@ -15,6 +15,7 @@ __all__ = [
     "parse_nitpick",
     "parse_quickcheck",
     "parse_sledgehammer",
+    "parse_theory_diagnostics",
     "parse_thm_deps",
     "parse_try0",
     "strip_trailing_state",
@@ -28,6 +29,7 @@ _TRAILING_MS = re.compile(r"\s*\(\d[^()]*ms\)\s*$")
 _THEOREM_COUNT = re.compile(r"(\d+)\s+theorem")
 _GOAL_HEADER = re.compile(r"goal \((\d+) subgoals?\):")
 _SUBGOAL_SPLIT = re.compile(r"(?m)^ *\d+\. ")
+_LINE_RE = re.compile(r"\bline\s+(\d+)\b", re.IGNORECASE)
 
 
 def strip_trailing_state(body: str) -> str:
@@ -110,14 +112,18 @@ def parse_goal_state(body: str) -> dict[str, Any]:
     """
     header = _GOAL_HEADER.search(body)
     if not header:
-        return {"goal_count": 0, "subgoals": []}
+        return {"goal_count": 0, "subgoals": [], "structured_subgoals": []}
     count = int(header.group(1))
     tail = body[header.end() :]
     # Drop the trailing "[timing] Ns" line, if present.
     tail = tail.split("\n[timing]")[0]
     parts = _SUBGOAL_SPLIT.split(tail)[1:]  # parts[0] is the bit before "1. "
     subgoals = [re.sub(r"\s+", " ", p).strip() for p in parts if p.strip()]
-    return {"goal_count": count, "subgoals": subgoals}
+    return {
+        "goal_count": count,
+        "subgoals": subgoals,
+        "structured_subgoals": [_structure_subgoal(s) for s in subgoals],
+    }
 
 
 def parse_thm_deps(body: str) -> dict[str, Any]:
@@ -127,3 +133,42 @@ def parse_thm_deps(body: str) -> dict[str, Any]:
     if lines and lines[0].startswith("dependencies:"):
         lines = lines[1:]
     return {"dependencies": lines}
+
+
+def parse_theory_diagnostics(body: str) -> dict[str, Any]:
+    """Best-effort diagnostic extraction from an I/R theory-load response."""
+    text = "\n".join(ln for ln in body.split("\n") if not ln.startswith("[timing]"))
+    stripped = text.strip()
+    if not stripped:
+        return {"errors": [], "warnings": []}
+    if stripped.startswith("Loaded theory "):
+        return {"errors": [], "warnings": []}
+
+    bucket = "warnings" if "warning" in stripped.lower() else "errors"
+    diag: dict[str, Any] = {"message": stripped}
+    match = _LINE_RE.search(stripped)
+    if match:
+        diag["line"] = int(match.group(1))
+    return {
+        "errors": [diag] if bucket == "errors" else [],
+        "warnings": [diag] if bucket == "warnings" else [],
+    }
+
+
+def _structure_subgoal(text: str) -> dict[str, Any]:
+    hypotheses: list[str] = []
+    conclusion = text
+    for arrow in ("⟹", "==>"):
+        if arrow in text:
+            left, conclusion = text.rsplit(arrow, 1)
+            hypotheses = _split_hypotheses(left)
+            conclusion = conclusion.strip()
+            break
+    return {"raw": text, "hypotheses": hypotheses, "conclusion": conclusion}
+
+
+def _split_hypotheses(text: str) -> list[str]:
+    text = text.strip()
+    if text.startswith("[|") and "|]" in text:
+        text = text[2 : text.index("|]")]
+    return [part.strip() for part in text.split(";") if part.strip()]

@@ -40,7 +40,6 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
     async def isabelle_open_repl(
         theory: str | None = None,
         parent_repl_id: str | None = None,
-        session: str | None = None,  # accepted for forward-compat; unused in M1
     ) -> dict[str, Any]:
         if parent_repl_id is not None:
             at: dict[str, object] = {"parent_repl_id": parent_repl_id}

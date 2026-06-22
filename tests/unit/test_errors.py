@@ -40,6 +40,16 @@ def test_error_envelope_omits_hint_when_none_available() -> None:
     assert "hint" not in env
 
 
+def test_error_envelope_can_include_server_event() -> None:
+    env = error_envelope(
+        "repl_not_found",
+        "stale",
+        "c3",
+        server_event="ir_restarted",
+    )
+    assert env["server_event"] == "ir_restarted"
+
+
 def test_tool_error_defaults_hint_from_table() -> None:
     err = ToolError("repl_not_found", "no such repl")
     assert err.code == "repl_not_found"

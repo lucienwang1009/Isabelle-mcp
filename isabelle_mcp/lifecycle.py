@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import os
 import secrets
 import threading
@@ -28,6 +29,7 @@ from isabelle_mcp.errors import ToolError, clamp_timeout, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.ir_daemon import IRDaemonHandle, launch_ir_daemon
 from isabelle_mcp.lifecycle_ops import AutomationMixin, FileOpsMixin
+from isabelle_mcp.safety import validate_isar_safe
 from isabelle_mcp.textutil import strip_timing as _strip_timing
 from isabelle_mcp.textutil import truncate as _truncate
 from isabelle_mcp.textutil import state_at_end_of_proof as _state_at_end_of_proof
@@ -63,6 +65,7 @@ class IRManager(AutomationMixin, FileOpsMixin):
         self._handle: IRDaemonHandle | None = None
         self._registry: dict[str, str] = {}  # opaque uuid -> internal id
         self._last_access: dict[str, float] = {}  # opaque uuid -> monotonic ts
+        self._pending_server_event: str | None = None
         self._lock = threading.Lock()
         ttl_raw = os.environ.get("ISABELLE_MCP_REPL_TTL_S", "1800")
         try:
@@ -115,16 +118,20 @@ class IRManager(AutomationMixin, FileOpsMixin):
         if crashed:
             metrics.increment("ir_restarts")
             logger.warning("I/R daemon died; restarting and invalidating repl_ids")
+            with self._lock:
+                self._pending_server_event = "ir_restarted"
         try:
             self.start()
         except Exception as exc:  # noqa: BLE001
-            raise ToolError("ir_unavailable", f"I/R daemon unavailable: {exc}") from exc
+            raise self._tool_error(
+                "ir_unavailable", f"I/R daemon unavailable: {exc}"
+            ) from exc
 
     def _require_handle(self) -> IRDaemonHandle:
         self._ensure_alive()
         handle = self._handle
         if handle is None or handle.process.poll() is not None:
-            raise ToolError("ir_unavailable", "I/R daemon is not running")
+            raise self._tool_error("ir_unavailable", "I/R daemon is not running")
         return handle
 
     # --- idle-REPL reaper ----------------------------------------------------
@@ -173,7 +180,7 @@ class IRManager(AutomationMixin, FileOpsMixin):
             with IRSession.connect(handle) as session:
                 yield session
         except OSError as exc:  # includes ConnectionError, socket.timeout
-            raise ToolError("ir_unavailable", f"cannot reach I/R: {exc}") from exc
+            raise self._tool_error("ir_unavailable", f"cannot reach I/R: {exc}") from exc
 
     def _resolve(self, repl_id: str) -> str:
         with self._lock:
@@ -181,8 +188,29 @@ class IRManager(AutomationMixin, FileOpsMixin):
             if internal is not None:
                 self._last_access[repl_id] = time.monotonic()
         if internal is None:
-            raise ToolError("repl_not_found", f"unknown repl_id {repl_id!r}")
+            raise self._tool_error("repl_not_found", f"unknown repl_id {repl_id!r}")
         return internal
+
+    def _consume_server_event(self) -> str | None:
+        with self._lock:
+            event, self._pending_server_event = self._pending_server_event, None
+        return event
+
+    def _with_server_event(self, result: dict[str, object]) -> dict[str, object]:
+        event = self._consume_server_event()
+        if event is not None:
+            result["server_event"] = event
+        return result
+
+    def _tool_error(
+        self, code: str, message: str, *, hint: str | None = None
+    ) -> ToolError:
+        return ToolError(
+            code,
+            message,
+            hint=hint,
+            server_event=self._consume_server_event(),
+        )
 
     # --- Layer B operations --------------------------------------------------
 
@@ -200,17 +228,17 @@ class IRManager(AutomationMixin, FileOpsMixin):
                     parent_internal = self._resolve(str(at["parent_repl_id"]))
                     env = session.fork(parent_internal, internal)
                     if not env["ok"]:
-                        raise ToolError(map_ir_error(env["body"]), env["body"])
+                        raise self._tool_error(map_ir_error(env["body"]), env["body"])
                 elif "theory" in at:
                     session.init(repl_id=internal, theories=[str(at["theory"])])
                 else:
-                    raise ToolError(
+                    raise self._tool_error(
                         "invalid_argument",
                         "`at` must contain 'theory' or 'parent_repl_id'",
                     )
                 summary = _strip_timing(session.state(internal).get("body", ""))
         except RuntimeError as exc:
-            raise ToolError(map_ir_error(str(exc)), str(exc)) from exc
+            raise self._tool_error(map_ir_error(str(exc)), str(exc)) from exc
 
         with self._lock:
             self._registry[new_uuid] = internal
@@ -219,37 +247,41 @@ class IRManager(AutomationMixin, FileOpsMixin):
         result: dict[str, object] = {"repl_id": new_uuid}
         if summary:
             result["goal_summary"] = _truncate(summary)
-        return result
+        return self._with_server_event(result)
 
     def step(
         self, repl_id: str, isar: str, *, timeout_seconds: float = 60.0
     ) -> dict[str, object]:
         """Run one Isar step. Returns ``{"output", "at_end_of_proof"}``."""
         timeout_seconds = clamp_timeout(timeout_seconds)
+        validate_isar_safe(isar)
         internal = self._resolve(repl_id)
         with self._session() as session:
-            env = session.step(internal, isar=isar, timeout_seconds=timeout_seconds)
+            session._set_step_timeout(internal, math.ceil(timeout_seconds))
+            env = session.step(
+                internal, isar=isar, timeout_seconds=timeout_seconds + 10.0
+            )
         if not env["ok"]:
-            raise ToolError(map_ir_error(env["body"]), env["body"])
-        return {
+            raise self._tool_error(map_ir_error(env["body"]), env["body"])
+        return self._with_server_event({
             "output": _truncate(_strip_timing(env["body"])),
             "at_end_of_proof": proof_closed(env),
-        }
+        })
 
     def undo(self, repl_id: str, *, n: int = 1) -> dict[str, object]:
         """Undo the last ``n`` steps. Returns ``{"steps_undone", "current_goal_summary"?}``."""
         if n < 1:
-            raise ToolError("invalid_argument", "n must be >= 1")
+            raise self._tool_error("invalid_argument", "n must be >= 1")
         internal = self._resolve(repl_id)
         with self._session() as session:
             env = session.undo(internal, n=n)
             if not env["ok"]:
-                raise ToolError(map_ir_error(env["body"]), env["body"])
+                raise self._tool_error(map_ir_error(env["body"]), env["body"])
             summary = _strip_timing(session.state(internal).get("body", ""))
         result: dict[str, object] = {"steps_undone": n}
         if summary:
             result["current_goal_summary"] = _truncate(summary)
-        return result
+        return self._with_server_event(result)
 
     def state(self, repl_id: str) -> dict[str, object]:
         """Return ``{"history", "current_goals", "at_end_of_proof"}``."""
@@ -258,18 +290,18 @@ class IRManager(AutomationMixin, FileOpsMixin):
             history = session.history(internal)
             state_env = session.state(internal)
         if not state_env["ok"]:
-            raise ToolError(map_ir_error(state_env["body"]), state_env["body"])
+            raise self._tool_error(map_ir_error(state_env["body"]), state_env["body"])
         body = _strip_timing(state_env["body"])
-        return {
+        return self._with_server_event({
             "history": history,
             "current_goals": _truncate(body),
             "goals": parsing.parse_goal_state(body),
             "at_end_of_proof": _state_at_end_of_proof(body),
-        }
+        })
 
     def fork(self, repl_id: str) -> dict[str, object]:
         """Fork an existing REPL at its current state. Returns ``{"repl_id"}``."""
-        return {"repl_id": self.open({"parent_repl_id": repl_id})["repl_id"]}
+        return self.open({"parent_repl_id": repl_id})
 
     def close_repl(self, repl_id: str) -> dict[str, object]:
         """Remove a REPL (and its descendants) on the daemon."""
@@ -279,4 +311,4 @@ class IRManager(AutomationMixin, FileOpsMixin):
         with self._lock:
             self._registry.pop(repl_id, None)
             self._last_access.pop(repl_id, None)
-        return {}
+        return self._with_server_event({})

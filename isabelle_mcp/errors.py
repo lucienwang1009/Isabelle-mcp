@@ -56,6 +56,9 @@ ERROR_HINTS: dict[str, list[str]] = {
     "proof_not_open": ["This tactic needs an open `proof` block."],
     "ir_unavailable": ["The I/R daemon is not reachable; it may have crashed."],
     "ml_disabled": ["Raw ML is disabled; set ISABELLE_MCP_ALLOW_ML=1 to enable."],
+    "afp_index_missing": [
+        "Build a local AFP source index first with `uv run isabelle-mcp afp-bootstrap` or `uv run isabelle-mcp afp-index --afp-root /path/to/afp/thys`."
+    ],
     "invalid_argument": ["Check the tool arguments against the schema."],
     "internal_error": [],
 }
@@ -64,10 +67,18 @@ ERROR_HINTS: dict[str, list[str]] = {
 class ToolError(Exception):
     """An error mappable to a stable code and surfaced as an MCP envelope."""
 
-    def __init__(self, code: str, message: str, *, hint: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        hint: str | None = None,
+        server_event: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.server_event = server_event
         # Fall back to the first curated hint for the code, if any.
         if hint is None:
             hints = ERROR_HINTS.get(code, [])
@@ -86,6 +97,7 @@ def error_envelope(
     correlation_id: str,
     *,
     hint: str | None = None,
+    server_event: str | None = None,
 ) -> dict[str, Any]:
     """Build a failure envelope per the cross-cutting contract (spec §4)."""
     if hint is None:
@@ -101,6 +113,8 @@ def error_envelope(
     }
     if hint is not None:
         envelope["hint"] = hint
+    if server_event is not None:
+        envelope["server_event"] = server_event
     return envelope
 
 

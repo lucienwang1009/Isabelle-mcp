@@ -9,6 +9,11 @@ import pytest
 from isabelle_mcp.server import build_server
 
 _EXPECTED = {
+    "isabelle_afp_search",
+    "isabelle_afp_status",
+    "isabelle_check_file",
+    "isabelle_check_project",
+    "isabelle_file_outline",
     "isabelle_open_repl",
     "isabelle_step",
     "isabelle_undo",

@@ -31,10 +31,17 @@ _SENTINEL = "<<DONE>>"
 def _ml_escape(text: str) -> str:
     """Escape a Python string for inclusion in an SML string literal.
 
-    Only ``\\`` and ``"`` need escaping for our purposes. Isabelle symbol
-    names like ``\\<and>`` are sent literally (no special handling).
+    Isabelle symbol names like ``\\<and>`` are sent literally as the canonical
+    ASCII symbol spelling, while SML string control characters are escaped so
+    the line-oriented TCP framing is not disturbed.
     """
-    return text.replace("\\", "\\\\").replace('"', '\\"')
+    return (
+        text.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+    )
 
 
 def _ml_int(n: int) -> str:
@@ -227,6 +234,13 @@ class IRSession:
         lines = [ln for ln in body.split("\n") if not ln.startswith("[timing]")]
         return [ln for ln in lines if ln != ""]
 
+    def load_theory(
+        self, theory: str, *, timeout_seconds: float = 120.0
+    ) -> dict[str, Any]:
+        """Load/check a theory by name via ``Ir.load_theory``."""
+        self._send_command(f'Ir.load_theory "{_ml_escape(theory)}";')
+        return self._read_response(timeout_seconds=timeout_seconds)
+
     # --- Layer C (automation) ------------------------------------------------
 
     def find_theorems(
@@ -270,6 +284,12 @@ class IRSession:
         so on success we ``Ir.back`` to drop the step. The per-REPL step timeout
         is raised to cover the diagnostic and restored to the 10s default after.
         """
+        before_len: int | None = None
+        try:
+            before_len = len(self.history(repl_id))
+        except (ConnectionError, RuntimeError, socket.timeout, BrokenPipeError):
+            before_len = None
+
         self._set_step_timeout(repl_id, int(timeout_secs))
         try:
             env = self.step(
@@ -277,13 +297,26 @@ class IRSession:
             )
         finally:
             self._set_step_timeout(repl_id, 10)
-        if env["ok"]:
-            self._send_command(f'Ir.back "{_ml_escape(repl_id)}";')
-            try:
-                self._read_response(timeout_seconds=10.0)
-            except (ConnectionError, socket.timeout, BrokenPipeError):
-                pass
+        self._undo_diagnostic_if_recorded(repl_id, before_len)
         return env
+
+    def _undo_diagnostic_if_recorded(
+        self, repl_id: str, before_len: int | None
+    ) -> None:
+        """Undo a diagnostic step only when I/R actually recorded one."""
+        if before_len is None:
+            return
+        try:
+            after_len = len(self.history(repl_id))
+        except (ConnectionError, RuntimeError, socket.timeout, BrokenPipeError):
+            return
+        if after_len <= before_len:
+            return
+        self._send_command(f'Ir.back "{_ml_escape(repl_id)}";')
+        try:
+            self._read_response(timeout_seconds=10.0)
+        except (ConnectionError, socket.timeout, BrokenPipeError):
+            pass
 
 
 # -----------------------------------------------------------------------------

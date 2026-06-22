@@ -23,6 +23,9 @@ class FakeSession:
     def __init__(self) -> None:
         self.inited: list[str] = []
         self.removed: list[str] = []
+        self.steps: list[tuple[str, str, float]] = []
+        self.timeouts: list[tuple[str, int]] = []
+        self.loaded_theories: list[str] = []
 
     def init(self, *, repl_id: str, theories: list[str]) -> str:
         self.inited.append(repl_id)
@@ -32,13 +35,23 @@ class FakeSession:
         return {"ok": True, "body": f'Forked REPL "{new_id}"'}
 
     def step(self, repl_id: str, *, isar: str, timeout_seconds: float = 60.0) -> dict[str, Any]:
+        self.steps.append((repl_id, isar, timeout_seconds))
         return {"ok": True, "body": "theorem t: P\n[timing] 0.0s"}
+
+    def _set_step_timeout(self, repl_id: str, secs: int) -> None:
+        self.timeouts.append((repl_id, secs))
 
     def state(self, repl_id: str, *, state_idx: int = -1) -> dict[str, Any]:
         return {"ok": True, "body": ""}
 
     def history(self, repl_id: str) -> list[str]:
         return []
+
+    def load_theory(
+        self, theory: str, *, timeout_seconds: float = 120.0
+    ) -> dict[str, Any]:
+        self.loaded_theories.append(theory)
+        return {"ok": True, "body": f'Loaded theory "{theory}"\n[timing] 0.0s'}
 
     def undo(self, repl_id: str, *, n: int = 1) -> dict[str, Any]:
         return {"ok": True, "body": "Truncated"}
@@ -103,6 +116,120 @@ def test_resolve_unknown_raises_repl_not_found(
     with pytest.raises(ToolError) as exc:
         mgr.step("does-not-exist", "by simp")
     assert exc.value.code == "repl_not_found"
+
+
+def test_step_sets_ir_timeout(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    internal = f"mcp_{repl_id}"
+
+    mgr.step(repl_id, "by simp", timeout_seconds=42)
+
+    assert fake.timeouts[-1] == (internal, 42)
+    assert fake.steps[-1] == (internal, "by simp", 52.0)
+
+
+def test_state_includes_pending_restart_event(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    mgr._pending_server_event = "ir_restarted"
+
+    state = mgr.state(repl_id)
+
+    assert state["server_event"] == "ir_restarted"
+    assert "server_event" not in mgr.state(repl_id)
+
+
+def test_step_blocks_raw_ml_by_default(
+    manager_with_fake: tuple[IRManager, FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ISABELLE_MCP_ALLOW_ML", raising=False)
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+
+    with pytest.raises(ToolError) as exc:
+        mgr.step(repl_id, 'ML "OS.Process.system \\"date\\""')
+
+    assert exc.value.code == "ml_disabled"
+    assert fake.steps == []
+
+
+def test_tool_error_consumes_pending_restart_event(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    mgr._pending_server_event = "ir_restarted"
+
+    with pytest.raises(ToolError) as exc:
+        mgr.undo(repl_id, n=0)
+
+    assert exc.value.server_event == "ir_restarted"
+
+
+def test_check_file_loads_header_theory(
+    manager_with_fake: tuple[IRManager, FakeSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    thy = tmp_path / "Foo.thy"
+    thy.write_text("theory Foo imports Main begin\nlemma a: \"True\" by simp\nend\n")
+    mgr, fake = manager_with_fake
+
+    checked = mgr.check_file(str(thy), timeout_seconds=20)
+
+    assert checked["checked"] is True
+    assert checked["theory"] == "Foo"
+    assert checked["imports"] == ["Main"]
+    assert checked["errors"] == []
+    assert fake.loaded_theories == ["Foo"]
+
+
+def test_check_file_with_project_context_uses_build_checker(
+    manager_with_fake: tuple[IRManager, FakeSession],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    project = tmp_path / "proof" / "Foo"
+    project.mkdir(parents=True)
+    (project / "ROOT").write_text("session Foo = HOL + theories Foo\n", encoding="utf-8")
+    thy = project / "Foo.thy"
+    thy.write_text("theory Foo imports Main begin\nlemma a: \"True\" by simp\nend\n")
+    mgr, fake = manager_with_fake
+    calls: list[dict[str, Any]] = []
+
+    def fake_check_project(root: str, **kwargs: Any) -> dict[str, object]:
+        calls.append({"root": root, **kwargs})
+        return {
+            "checked": True,
+            "returncode": 0,
+            "root": root,
+            "session": kwargs["session"],
+            "session_dirs": kwargs["session_dirs"],
+            "command": ["isabelle", "build"],
+            "command_text": "isabelle build",
+            "errors": [],
+            "warnings": [],
+            "output": "",
+        }
+
+    mgr.check_project = fake_check_project  # type: ignore[method-assign]
+
+    checked = mgr.check_file(str(thy), session="Foo", timeout_seconds=20)
+
+    assert checked["checked"] is True
+    assert checked["checked_via"] == "isabelle_build"
+    assert checked["theory"] == "Foo"
+    assert calls[0]["root"] == str(project)
+    assert calls[0]["session"] == "Foo"
+    assert fake.loaded_theories == []
 
 
 def test_close_repl_removes_mapping_and_calls_remove(

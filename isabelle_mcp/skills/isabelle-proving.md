@@ -63,10 +63,14 @@ is proved only when Isabelle accepts it with no `sorry`/`oops`.
 | `isabelle_try0(repl_id)` | Cheap tactic sweep; **try this first when stuck.** |
 | `isabelle_sledgehammer(repl_id, timeout_s)` | External provers; returns one-liners. |
 | `isabelle_find_theorems(repl_id, query)` | Search the loaded library for lemmas. |
+| `isabelle_afp_search(query)` | Search the local AFP source index for candidate lemmas (discovery only). |
+| `isabelle_afp_status()` | Check whether the local AFP source cache/index is ready. |
 | `isabelle_nitpick(repl_id)` | Look for a finite counterexample. |
 | `isabelle_quickcheck(repl_id)` | Randomised/exhaustive counterexample search. |
 | `isabelle_multi_attempt(repl_id, tactics)` | Race several tactics on isolated forks. |
 | `isabelle_file_outline(path)` | List a `.thy`'s imports + declarations with lines. |
+| `isabelle_check_project(root)` | Run `isabelle build` on a ROOT/session project and return build diagnostics. |
+| `isabelle_check_file(path, session)` | Check a theory file; with `session`/`session_dirs`, uses project build. |
 | `isabelle_run_code(code)` | Run one command in a throwaway scratch context. |
 
 ## Automation cascade (when stuck on a goal)
@@ -78,6 +82,10 @@ one-liner with `isabelle_step`.
 isabelle_try0            # runs simp/auto/blast/metis/… — cheapest, do this first
 ↓ (didn't close)
 isabelle_find_theorems   # find a lemma to cite, then: by (simp add: lemma) / (metis lemma)
+↓
+isabelle_afp_status      # check whether the local AFP source index is ready
+↓
+isabelle_afp_search      # discover AFP candidates when the loaded session is too small
 ↓
 isabelle_sledgehammer    # external ATPs; paste back the suggested metis/smt one-liner
 ↓
@@ -99,6 +107,8 @@ A proof is done when:
 
 - the final `isabelle_step` reports `at_end_of_proof: true` (or `theorem`/`lemma`
   is accepted with no remaining subgoals);
+- for edited files in a local session, `isabelle_check_project(root=...)` reports
+  `checked: true`;
 - there is **no** `sorry` or `oops` anywhere in the proof;
 - the statement is unchanged from what was asked.
 

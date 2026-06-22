@@ -51,6 +51,36 @@ Examples of entries that come up in CS theory work:
 
 (Always confirm the exact session name on the entry's AFP page.)
 
+### Local AFP source index
+
+For broad AFP discovery, download the current AFP sources into the local cache
+and build a lightweight source index without building AFP heaps:
+
+```bash
+uv run isabelle-mcp afp-bootstrap
+uv run isabelle-mcp afp-status
+uv run isabelle-mcp afp-search "finite automata"
+```
+
+If AFP sources are already available locally, index that checkout instead:
+
+```bash
+uv run isabelle-mcp afp-index --afp-root /path/to/afp/thys
+uv run isabelle-mcp afp-search "finite automata"
+uv run isabelle-mcp afp-search "name:comm kind:lemma"
+```
+
+For one-shot local setup, `bash scripts/bootstrap.sh --with-afp` performs the
+same download/extract/index step; `--afp-root /path/to/afp/thys` reuses an
+existing checkout. Inside MCP, use `isabelle_afp_status()` to check readiness and
+`isabelle_afp_search(query)` for the discovery step.
+
+The index stores source-level facts
+(entry/session/theory/path/imports/declaration statement/snippet). It does
+**not** prove that a lemma is available in the running I/R session. After
+finding a candidate, load/build the relevant session and confirm with
+`isabelle_find_theorems`.
+
 ### Using an AFP entry from a theory
 
 1. Download the AFP and register it as an Isabelle component (once):

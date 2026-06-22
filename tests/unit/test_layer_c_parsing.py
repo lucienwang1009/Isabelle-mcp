@@ -11,6 +11,7 @@ from isabelle_mcp.parsing import (
     parse_nitpick,
     parse_quickcheck,
     parse_sledgehammer,
+    parse_theory_diagnostics,
     parse_thm_deps,
     parse_try0,
     strip_trailing_state,
@@ -62,6 +63,15 @@ def test_parse_sledgehammer_none() -> None:
     assert parsed["one_liner"] is None
 
 
+def test_parse_sledgehammer_keeps_compound_tactic() -> None:
+    body = (
+        "cvc4: Try this: by (metis append_assoc rev_rev_ident) (17 ms)\n"
+        "[timing] 1.0s"
+    )
+    parsed = parse_sledgehammer(body)
+    assert parsed["one_liner"] == "by (metis append_assoc rev_rev_ident)"
+
+
 def test_parse_nitpick_counterexample() -> None:
     body = "Nitpick found a counterexample:\n  x = 2\n" + _STATE
     assert parse_nitpick(body)["result"] == "counterexample"
@@ -105,3 +115,17 @@ def test_parse_find_theorems_empty() -> None:
 def test_parse_thm_deps() -> None:
     body = "dependencies: 3\nallI\nmp\nimpI\n" + _STATE
     assert parse_thm_deps(body)["dependencies"] == ["allI", "mp", "impI"]
+
+
+def test_parse_theory_diagnostics_error_with_line() -> None:
+    parsed = parse_theory_diagnostics("Outer syntax error at line 12: bad command")
+    assert parsed["errors"] == [
+        {"message": "Outer syntax error at line 12: bad command", "line": 12}
+    ]
+    assert parsed["warnings"] == []
+
+
+def test_parse_theory_diagnostics_warning() -> None:
+    parsed = parse_theory_diagnostics("Warning: legacy feature")
+    assert parsed["errors"] == []
+    assert parsed["warnings"] == [{"message": "Warning: legacy feature"}]

@@ -49,7 +49,7 @@ def register_layer_c(mcp: FastMCP, manager: IRManager) -> None:
         ),
     )
     async def isabelle_sledgehammer(
-        repl_id: str, timeout_s: int = 120, minimize: bool = True
+        repl_id: str, timeout_s: int = 120
     ) -> dict[str, Any]:
         return await run_tool(
             lambda: manager.sledgehammer(repl_id, timeout_seconds=float(timeout_s)),
