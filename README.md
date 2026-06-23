@@ -61,6 +61,9 @@ The server exposes Layer A (file/utility), Layer B (REPL) and Layer C
 (automation) tools. Position-anchored `goal_at`/`diagnostics` and `hover`
 remain deferred (I/R strips PIDE markup to plain text — see the M3 plan).
 
+For the tool reference, the proving loop, and common pipelines, see
+[`docs/usage.md`](docs/usage.md).
+
 Register it with an MCP client (e.g. Claude Code `.mcp.json`):
 
 ```json
