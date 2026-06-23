@@ -30,6 +30,8 @@ _THEOREM_COUNT = re.compile(r"(\d+)\s+theorem")
 _GOAL_HEADER = re.compile(r"goal \((\d+) subgoals?\):")
 _SUBGOAL_SPLIT = re.compile(r"(?m)^ *\d+\. ")
 _LINE_RE = re.compile(r"\bline\s+(\d+)\b", re.IGNORECASE)
+# Leading glyphs of a wrapped term fragment in an SMT warning continuation.
+_TERM_GLYPHS = "⟦⟧⟹⟶⋀∀∃¬∧∨"
 
 
 def strip_trailing_state(body: str) -> str:
@@ -55,9 +57,39 @@ def parse_try0(body: str) -> dict[str, Any]:
     return {"found": tactic is not None, "tactic": tactic, "output": diag}
 
 
+def _filter_smt_noise(text: str) -> str:
+    """Drop ``SMT: Warning: dropping assumption`` blocks (with their wrapped
+    term continuations) from sledgehammer output — pure noise that buries the
+    found/one_liner signal.  A trailing marker records how many lines were cut.
+    """
+    kept: list[str] = []
+    dropped = 0
+    skipping = False
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("SMT:"):
+            skipping = True
+            dropped += 1
+            continue
+        if skipping:
+            # A wrapped continuation of the SMT warning: indented, blank, or a
+            # bare term fragment (starts with logic/bracket glyphs). Anything
+            # else ends the block.
+            if not stripped or line[:1].isspace() or stripped[:1] in _TERM_GLYPHS:
+                dropped += 1
+                continue
+            skipping = False
+        kept.append(line)
+    out = "\n".join(kept).strip("\n")
+    if dropped:
+        suffix = f"[{dropped} SMT warning line(s) filtered]"
+        out = f"{out}\n{suffix}" if out else suffix
+    return out
+
+
 def parse_sledgehammer(body: str) -> dict[str, Any]:
     """Extract prover ``Try this:`` one-liners from sledgehammer output."""
-    diag = strip_trailing_state(body)
+    diag = _filter_smt_noise(strip_trailing_state(body))
     suggestions = [_clean_tactic(s) for s in _TRY_THIS.findall(diag)]
     # Preserve order, drop duplicates.
     seen: dict[str, None] = {}

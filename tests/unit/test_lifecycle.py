@@ -261,3 +261,78 @@ def test_ir_unavailable_when_not_started() -> None:
         mgr.step("any", "by simp")
     # _resolve runs first and the id is unknown -> repl_not_found.
     assert exc.value.code == "repl_not_found"
+
+
+def test_step_strips_autocorrect_note(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+
+    def noisy_step(repl_id: str, *, isar: str, timeout_seconds: float = 60.0) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "body": (
+                "NOTE: double backslash auto-corrected in symbol escapes. "
+                "Prefer ASCII symbols.\ntheorem t: P\n[timing] 0.0s"
+            ),
+        }
+
+    fake.step = noisy_step  # type: ignore[assignment,method-assign]
+    out = mgr.step(repl_id, 'lemma t: "P"')["output"]
+    assert "double backslash" not in out
+    assert "theorem t: P" in out
+
+
+def test_step_multi_command_failure_adds_hint(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+
+    def failing_step(repl_id: str, *, isar: str, timeout_seconds: float = 60.0) -> dict[str, Any]:
+        return {"ok": False, "body": "Failed to finish proof:\ngoal (1 subgoal):"}
+
+    fake.step = failing_step  # type: ignore[assignment,method-assign]
+    block = 'proof -\n  have a: "P" by simp\n  show ?thesis\nqed'
+    with pytest.raises(ToolError) as exc:
+        mgr.step(repl_id, block)
+    assert exc.value.code == "tactic_failed"
+    assert exc.value.hint is not None and "one command per" in exc.value.hint
+
+
+def test_state_caps_history(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, fake = manager_with_fake
+    repl_id = mgr.open({"theory": "Main"})["repl_id"]
+    fake.history = lambda _internal: [f"step {i}" for i in range(120)]  # type: ignore[assignment,method-assign]
+    history = mgr.state(repl_id)["history"]
+    assert len(history) == 51  # 1 elision marker + 50 most-recent steps
+    assert "omitted" in history[0]
+    assert history[-1] == "step 119"
+
+
+def test_ensure_session_noop_when_unchanged(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+
+    class _Proc:
+        def poll(self) -> None:
+            return None
+
+    class _Handle:
+        def __init__(self) -> None:
+            self.process = _Proc()
+
+    mgr._handle = _Handle()  # type: ignore[assignment]
+    mgr._session_name = "HOL"
+    mgr._session_dir = None
+    relaunched: list[tuple[str, object]] = []
+    mgr._relaunch_session = lambda s, d: relaunched.append((s, d))  # type: ignore[assignment,method-assign]
+
+    mgr.ensure_session("HOL", None)
+    assert relaunched == []  # same session -> no relaunch
+    mgr.ensure_session("Other", None)
+    assert relaunched == [("Other", None)]

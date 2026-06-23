@@ -37,7 +37,7 @@ def register_layer_a(mcp: FastMCP, manager: IRManager) -> None:
     )
     async def isabelle_file_outline(path: str) -> dict[str, Any]:
         def _outline() -> dict[str, Any]:
-            return parse_theory_outline(read_theory_file(path))
+            return parse_theory_outline(read_theory_file(path, trusted=True))
 
         return await run_tool(_outline, tool="isabelle_file_outline")
 

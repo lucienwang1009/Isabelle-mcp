@@ -64,8 +64,15 @@ def test_tool_error_defaults_hint_from_table() -> None:
         ('No REPL "R"', "repl_not_found"),
         ("Inner syntax error at ...", "parse_error"),
         ("Type unification failed", "parse_error"),
+        ("Cheating requires quick_and_dirty mode!", "sorry_disabled"),
         ("something we have never seen", "internal_error"),
     ],
 )
 def test_map_ir_error(body: str, expected: str) -> None:
     assert map_ir_error(body) == expected
+
+
+def test_sorry_disabled_has_hint() -> None:
+    err = ToolError("sorry_disabled", "Cheating requires quick_and_dirty mode!")
+    assert err.hint is not None
+    assert "quick_and_dirty" in err.hint

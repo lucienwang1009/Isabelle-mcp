@@ -27,9 +27,20 @@ def max_preview_chars() -> int:
     return _DEFAULT_MAX_PREVIEW_CHARS
 
 
+# Advisory banner the vendored I/R REPL prepends on every step that uses
+# ``\<...>`` escapes; the autocorrect already happened, so it is pure per-call
+# noise. Filtered here rather than in the (vendored) ml_repl.ML.
+_AUTOCORRECT_NOTE = "NOTE: double backslash auto-corrected in symbol escapes"
+
+
 def strip_timing(body: str) -> str:
-    """Drop I/R's trailing ``[timing] Ns`` lines from a response body."""
-    lines = [ln for ln in body.split("\n") if not ln.startswith("[timing]")]
+    """Drop I/R's trailing ``[timing] Ns`` lines and the repeated symbol-escape
+    autocorrect NOTE banner from a response body."""
+    lines = [
+        ln
+        for ln in body.split("\n")
+        if not ln.startswith("[timing]") and _AUTOCORRECT_NOTE not in ln
+    ]
     return "\n".join(lines).rstrip("\n")
 
 

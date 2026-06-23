@@ -59,6 +59,54 @@ class IRDaemonHandle:
                 thread.join(timeout=2.0)
 
 
+def _port_in_use(port: int) -> bool:
+    """True if something is already accepting connections on 127.0.0.1:port.
+
+    A stale I/R daemon from a previous run typically still holds the pinned
+    port; binding over it is what produced the opaque "exited before printing
+    the auth token" failures.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _find_free_port() -> int:
+    """Ask the OS for an unused loopback TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _resolve_port(port: int | None) -> int:
+    """Choose the port to launch on, recovering from a busy default.
+
+    If ``port`` is given explicitly (``ISABELLE_MCP_PORT``) and it is busy, we
+    fail loudly with the remedy. If we are on the default port and it is busy
+    (the common stale-daemon case), we transparently fall back to a free port —
+    we pass it via ``--port`` so we still know it without parsing stdout.
+    """
+    explicit = port is not None
+    chosen = port if explicit else _DEFAULT_PORT
+    if not _port_in_use(chosen):
+        return chosen
+    if explicit:
+        raise RuntimeError(
+            f"configured I/R port {chosen} is already in use (a stale daemon?). "
+            f"Free it (e.g. `lsof -nP -iTCP:{chosen}` then kill the PID) or set "
+            "ISABELLE_MCP_PORT to a free port."
+        )
+    free = _find_free_port()
+    logger.warning(
+        "default I/R port %d is busy (stale daemon?); falling back to free port %d",
+        chosen,
+        free,
+    )
+    return free
+
+
 def _wait_for_listener(port: int, timeout_seconds: float) -> None:
     """Block until something accepts connections on 127.0.0.1:port, or fail."""
     deadline = time.monotonic() + timeout_seconds
@@ -164,6 +212,7 @@ def launch_ir_daemon(
     port: int | None = None,
     bash_server: bool = False,
     startup_timeout_seconds: float = 90.0,
+    session_dir: Path | None = None,
 ) -> IRDaemonHandle:
     """Spawn I/R as a subprocess and wait until its TCP listener is up.
 
@@ -180,7 +229,7 @@ def launch_ir_daemon(
     if not repl_script.is_file():
         raise FileNotFoundError(f"missing I/R entry point: {repl_script}")
 
-    chosen_port = port if port is not None else _DEFAULT_PORT
+    chosen_port = _resolve_port(port)
 
     env = os.environ.copy()
 
@@ -195,6 +244,8 @@ def launch_ir_daemon(
         str(chosen_port),
         "--server-only",
     ]
+    if session_dir is not None:
+        cmd.extend(["--dir", str(session_dir)])
     if not bash_server:
         cmd.append("--no-bash-server")
 

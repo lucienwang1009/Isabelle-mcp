@@ -22,8 +22,12 @@ is proved only when Isabelle accepts it with no `sorry`/`oops`.
    `isabelle_find_theorems` and `isabelle_sledgehammer` before hand-writing a
    proof. For results outside `HOL`, consult the **AFP** (see the
    `skill://isabelle/afp-and-search` resource).
-2. **Build incrementally.** One Isar command per `isabelle_step`. Read the proof
-   state after every step; never paste a whole script blind.
+2. **Build incrementally.** One Isar command per `isabelle_step` — a step that
+   bundles several commands rolls back as a unit on failure, losing the locus.
+   Read the proof state after every step; never paste a whole script blind. To
+   sketch a long structured proof you may `declare [[quick_and_dirty]]` once and
+   use `sorry` as scaffolding, but remove every `sorry`/`oops` before
+   `isabelle_check_project` (the build stays strict).
 3. **Falsify before sinking time in.** Run `isabelle_nitpick` /
    `isabelle_quickcheck` on a doubtful goal first — a counterexample means the
    statement is wrong; fix the statement, don't fight the proof.
@@ -54,7 +58,7 @@ is proved only when Isabelle accepts it with no `sorry`/`oops`.
 
 | Tool | Use |
 |---|---|
-| `isabelle_open_repl(theory)` | Start a branchable REPL session. |
+| `isabelle_open_repl(theory)` | Start a branchable REPL session. Pass `session`+`session_dirs` (a pre-built local session) to open on your own project's theories instead of re-pasting definitions. |
 | `isabelle_step(repl_id, isar)` | Run ONE Isar command; returns new state. |
 | `isabelle_state(repl_id)` | Current goals + history (read-only). |
 | `isabelle_undo(repl_id, n)` | Drop the last `n` steps. |

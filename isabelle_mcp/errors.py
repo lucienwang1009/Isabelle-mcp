@@ -56,6 +56,11 @@ ERROR_HINTS: dict[str, list[str]] = {
     "proof_not_open": ["This tactic needs an open `proof` block."],
     "ir_unavailable": ["The I/R daemon is not reachable; it may have crashed."],
     "ml_disabled": ["Raw ML is disabled; set ISABELLE_MCP_ALLOW_ML=1 to enable."],
+    "sorry_disabled": [
+        "`sorry`/`oops` are rejected by default. To scaffold a long proof, run "
+        "`declare [[quick_and_dirty]]` once in the REPL first; remove every "
+        "`sorry`/`oops` before isabelle_check_project (the build stays strict)."
+    ],
     "afp_index_missing": [
         "Build a local AFP source index first with `uv run isabelle-mcp afp-bootstrap` or `uv run isabelle-mcp afp-index --afp-root /path/to/afp/thys`."
     ],
@@ -122,6 +127,7 @@ def error_envelope(
 # we pattern-match on Isabelle / I/R error bodies. Conservative: anything
 # unrecognized stays ``internal_error``.
 _IR_ERROR_RULES: list[tuple[str, str]] = [
+    ("Cheating requires quick_and_dirty", "sorry_disabled"),
     ("timed out", "timeout"),
     ("Timeout", "timeout"),
     ("Failed to finish proof", "tactic_failed"),

@@ -63,6 +63,35 @@ def test_parse_sledgehammer_none() -> None:
     assert parsed["one_liner"] is None
 
 
+def test_parse_sledgehammer_filters_smt_warning_noise() -> None:
+    body = (
+        "Sledgehammering...\n"
+        "SMT: Warning: dropping assumption: ⟦?P ?x; ⋀x. ?P x ⟹ x ≤ ?M;\n"
+        " ⋀m. ⟦?P m⟧ ⟹ ?thesis⟧\n"
+        "⟹ ?thesis\n"
+        "SMT: Warning: dropping assumption: finite ?B\n"
+        "No proof found.\n"
+        "[timing] 30s"
+    )
+    parsed = parse_sledgehammer(body)
+    assert parsed["found"] is False
+    assert "dropping assumption" not in parsed["output"]
+    assert "SMT:" not in parsed["output"]
+    assert "Sledgehammering..." in parsed["output"]
+    assert "No proof found." in parsed["output"]
+    assert "SMT warning line(s) filtered" in parsed["output"]
+
+
+def test_parse_sledgehammer_noise_filter_keeps_suggestions() -> None:
+    body = (
+        "SMT: Warning: dropping assumption: ⟦?P⟧\n"
+        "z3: Try this: by (metis foo) (3 ms)\n"
+        "[timing] 1.0s"
+    )
+    parsed = parse_sledgehammer(body)
+    assert parsed["one_liner"] == "by (metis foo)"
+
+
 def test_parse_sledgehammer_keeps_compound_tactic() -> None:
     body = (
         "cvc4: Try this: by (metis append_assoc rev_rev_ident) (17 ms)\n"

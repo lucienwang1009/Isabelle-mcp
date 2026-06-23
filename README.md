@@ -80,8 +80,9 @@ Tools advertised:
 - **Layer A (file/utility):** `isabelle_file_outline`, `isabelle_check_file`,
   `isabelle_check_project`, `isabelle_afp_search`, `isabelle_afp_status`,
   `isabelle_run_code`, `isabelle_multi_attempt`.
-- **Layer B (REPL):** `isabelle_open_repl`, `isabelle_step`, `isabelle_undo`,
-  `isabelle_state`, `isabelle_fork_repl`, `isabelle_close_repl`.
+- **Layer B (REPL):** `isabelle_open_repl` (optionally `session` +
+  `session_dirs` to anchor on a locally built session image), `isabelle_step`,
+  `isabelle_undo`, `isabelle_state`, `isabelle_fork_repl`, `isabelle_close_repl`.
 - **Layer C (automation):** `isabelle_try0`, `isabelle_sledgehammer`,
   `isabelle_find_theorems`, `isabelle_nitpick`, `isabelle_quickcheck`
   (+ `isabelle_thm_deps` when `ISABELLE_MCP_EXPOSE_ADVANCED=1`).
@@ -116,13 +117,13 @@ is exposed under HTTP.
 |---|---|
 | `ISABELLE_MCP_SESSION` | Isabelle session image (default `HOL`) |
 | `ISABELLE_MCP_TRANSPORT` | `stdio` (default), `sse`, `streamable-http` |
-| `ISABELLE_MCP_PORT` | I/R daemon TCP port (default 9147) |
+| `ISABELLE_MCP_PORT` | I/R daemon TCP port (default 9147; if the default is busy the server auto-falls back to a free port, so a stale daemon no longer wedges startup) |
 | `ISABELLE_MCP_HOST` / `ISABELLE_MCP_PORT_HTTP` | HTTP bind (default 127.0.0.1:8000) |
 | `ISABELLE_MCP_NO_BASH_SERVER=1` | Disable sledgehammer's ATPs (faster start) |
 | `ISABELLE_MCP_EXPOSE_ADVANCED=1` | Expose `isabelle_thm_deps` |
 | `ISABELLE_MCP_ALLOW_ML=1` | Allow raw Isabelle/ML commands (`ML`, `ML_file`, `setup`, ...); disabled by default |
 | `ISABELLE_MCP_DISABLED_TOOLS` | Comma-separated tool names to hide |
-| `ISABELLE_MCP_ALLOWED_DIRS` | Extra roots for `file_outline` (path-separated) |
+| `ISABELLE_MCP_ALLOWED_DIRS` | Extra allow-list roots for incidental reads (path-separated). Note: paths you pass explicitly to `check_project`/`check_file`/`file_outline` are trusted and need no entry here |
 | `ISABELLE_MCP_AFP_INDEX_DB` | Local AFP source index path (default `~/.cache/isabelle-mcp/afp-index.sqlite3`) |
 | `ISABELLE_MCP_BOOTSTRAP_AFP=1` | `scripts/bootstrap.sh` only: download/index AFP during one-shot setup |
 | `ISABELLE_MCP_MAX_TIMEOUT_S` | Per-call timeout ceiling (default 600) |

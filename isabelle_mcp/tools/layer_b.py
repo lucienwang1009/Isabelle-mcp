@@ -33,18 +33,28 @@ def register_layer_b(mcp: FastMCP, manager: IRManager) -> None:
             "Open a stateful Isabelle REPL and return an opaque `repl_id`. "
             "Provide `theory` (e.g. \"Main\" for plain HOL) to anchor a fresh "
             "REPL, OR `parent_repl_id` to branch from an existing REPL's "
-            "current state. Pass the returned repl_id to every other isabelle_* "
-            "tool. Example: isabelle_open_repl(theory=\"Main\")."
+            "current state. To open on a locally built session image, also pass "
+            "`session` (its name) and `session_dirs` (the ROOT dir(s)) with a "
+            "`theory` from that session — the daemon switches to it (this "
+            "invalidates existing repl_ids). Build the session first. "
+            "Pass the returned repl_id to every other isabelle_* tool. "
+            "Example: isabelle_open_repl(theory=\"Main\")."
         ),
     )
     async def isabelle_open_repl(
         theory: str | None = None,
         parent_repl_id: str | None = None,
+        session: str | None = None,
+        session_dirs: list[str] | None = None,
     ) -> dict[str, Any]:
         if parent_repl_id is not None:
             at: dict[str, object] = {"parent_repl_id": parent_repl_id}
         elif theory is not None:
             at = {"theory": theory}
+            if session is not None:
+                at["session"] = session
+            if session_dirs is not None:
+                at["session_dirs"] = session_dirs
         else:
             return error_envelope(
                 "invalid_argument",

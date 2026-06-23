@@ -29,7 +29,7 @@ from isabelle_mcp.errors import ToolError, clamp_timeout, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.ir_daemon import IRDaemonHandle, launch_ir_daemon
 from isabelle_mcp.lifecycle_ops import AutomationMixin, FileOpsMixin
-from isabelle_mcp.safety import validate_isar_safe
+from isabelle_mcp.safety import looks_multi_command, validate_isar_safe
 from isabelle_mcp.textutil import strip_timing as _strip_timing
 from isabelle_mcp.textutil import truncate as _truncate
 from isabelle_mcp.textutil import state_at_end_of_proof as _state_at_end_of_proof
@@ -37,6 +37,10 @@ from isabelle_mcp.textutil import state_at_end_of_proof as _state_at_end_of_proo
 logger = logging.getLogger(__name__)
 
 __all__ = ["IRManager"]
+
+# Cap the step history returned by `state` so long proofs don't dump everything;
+# the most recent steps are the relevant ones.
+_HISTORY_CAP = 50
 
 
 class IRManager(AutomationMixin, FileOpsMixin):
@@ -59,6 +63,7 @@ class IRManager(AutomationMixin, FileOpsMixin):
         self._isabelle_bin = isabelle_bin
         self._ir_dir = ir_dir
         self._session_name = session
+        self._session_dir: Path | None = None
         self._port = port
         self._bash_server = bash_server
         self._startup_timeout = startup_timeout_seconds
@@ -90,8 +95,42 @@ class IRManager(AutomationMixin, FileOpsMixin):
                 port=self._port,
                 bash_server=self._bash_server,
                 startup_timeout_seconds=self._startup_timeout,
+                session_dir=self._session_dir,
             )
         self._start_reaper()
+
+    def ensure_session(self, session: str, session_dir: Path | None) -> None:
+        """Ensure the daemon runs ``session`` (with ``session_dir`` on its path).
+
+        The daemon hosts a single session image, so opening a REPL on a different
+        session relaunches it — invalidating existing repl_ids (a server_event is
+        flagged). A no-op when the daemon already runs the requested session, so
+        the common ``open_repl(theory=...)`` path is unaffected.
+        """
+        with self._lock:
+            same = (
+                self._handle is not None
+                and self._handle.process.poll() is None
+                and self._session_name == session
+                and self._session_dir == session_dir
+            )
+        if same:
+            return
+        self._relaunch_session(session, session_dir)
+
+    def _relaunch_session(self, session: str, session_dir: Path | None) -> None:
+        """Terminate the current daemon and start one on the requested session."""
+        with self._lock:
+            handle, self._handle = self._handle, None
+            self._registry.clear()
+            self._last_access.clear()
+            self._session_name = session
+            self._session_dir = session_dir
+            self._pending_server_event = "ir_session_changed"
+        if handle is not None:
+            logger.info("switching I/R session to %s (dir=%s)", session, session_dir)
+            handle.terminate()
+        self.start()
 
     def close(self) -> None:
         """Terminate the daemon, stop the reaper, and drop the registry."""
@@ -217,9 +256,18 @@ class IRManager(AutomationMixin, FileOpsMixin):
     def open(self, at: dict[str, object]) -> dict[str, object]:
         """Open a REPL at a theory or by forking another REPL.
 
-        ``at`` is ``{"theory": str}`` or ``{"parent_repl_id": str}``.
+        ``at`` is ``{"theory": str}`` or ``{"parent_repl_id": str}``; a ``theory``
+        open may also carry ``"session"`` / ``"session_dirs"`` to anchor the REPL
+        on a locally built session image (relaunching the daemon if needed).
         Returns ``{"repl_id", "goal_summary"?}``.
         """
+        requested_session = at.get("session")
+        if requested_session is not None and "theory" in at:
+            raw_dirs = at.get("session_dirs") or []
+            session_dir = (
+                Path(str(raw_dirs[0])).expanduser().resolve() if raw_dirs else None
+            )
+            self.ensure_session(str(requested_session), session_dir)
         new_uuid = secrets.token_hex(8)
         internal = f"mcp_{new_uuid}"
         try:
@@ -262,7 +310,15 @@ class IRManager(AutomationMixin, FileOpsMixin):
                 internal, isar=isar, timeout_seconds=timeout_seconds + 10.0
             )
         if not env["ok"]:
-            raise self._tool_error(map_ir_error(env["body"]), env["body"])
+            code = map_ir_error(env["body"])
+            hint: str | None = None
+            if code in {"tactic_failed", "parse_error"} and looks_multi_command(isar):
+                hint = (
+                    "This step submitted multiple Isar commands, so the whole "
+                    "block rolled back. Submit one command per isabelle_step so "
+                    "the failure localizes and the applied prefix is kept."
+                )
+            raise self._tool_error(code, env["body"], hint=hint)
         return self._with_server_event({
             "output": _truncate(_strip_timing(env["body"])),
             "at_end_of_proof": proof_closed(env),
@@ -289,6 +345,9 @@ class IRManager(AutomationMixin, FileOpsMixin):
         with self._session() as session:
             history = session.history(internal)
             state_env = session.state(internal)
+        if len(history) > _HISTORY_CAP:
+            omitted = len(history) - _HISTORY_CAP
+            history = [f"… ({omitted} earlier step(s) omitted)", *history[-_HISTORY_CAP:]]
         if not state_env["ok"]:
             raise self._tool_error(map_ir_error(state_env["body"]), state_env["body"])
         body = _strip_timing(state_env["body"])

@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 
 from isabelle_mcp.errors import ToolError
-from isabelle_mcp.safety import first_isar_command, validate_isar_safe
+from isabelle_mcp.safety import (
+    first_isar_command,
+    looks_multi_command,
+    validate_isar_safe,
+)
 
 
 def test_first_command_skips_whitespace_and_nested_comments() -> None:
@@ -40,3 +44,20 @@ def test_validate_allows_normal_isar(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_validate_allows_raw_ml_when_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ISABELLE_MCP_ALLOW_ML", "1")
     validate_isar_safe('ML "writeln \\"hi\\""')
+
+
+def test_multi_command_detects_pasted_proof_block() -> None:
+    assert looks_multi_command("proof -\n  have a: \"P\" by simp\n  show ?thesis\nqed")
+
+
+@pytest.mark.parametrize(
+    "single",
+    [
+        'lemma foo: "P x"',
+        'have "x = y" using a b by simp',  # connectives, not openers
+        "by (simp add: foo)",
+        'lemma foo:\n  assumes "P"\n  shows "Q"',  # one multi-line statement
+    ],
+)
+def test_multi_command_ignores_single_commands(single: str) -> None:
+    assert not looks_multi_command(single)

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from isabelle_mcp.errors import ToolError, clamp_timeout
-from isabelle_mcp.sandbox import read_theory_file, resolve_in_sandbox
+from isabelle_mcp.sandbox import read_theory_file, resolve_in_sandbox, resolve_target
 
 
 def test_clamp_timeout_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,3 +61,35 @@ def test_sandbox_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     with pytest.raises(ToolError) as exc:
         read_theory_file("Nope.thy")
     assert exc.value.code == "file_not_found"
+
+
+def test_resolve_target_trusts_outside_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An explicit build/check target outside the allow-list is trusted.
+    project = tmp_path / "elsewhere"
+    project.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.delenv("ISABELLE_MCP_ALLOWED_DIRS", raising=False)
+    # resolve_in_sandbox would reject it; resolve_target accepts it.
+    with pytest.raises(ToolError):
+        resolve_in_sandbox(str(project))
+    assert resolve_target(str(project)) == project.resolve()
+
+
+def test_trusted_read_reads_outside_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "elsewhere"
+    project.mkdir()
+    thy = project / "Baz.thy"
+    thy.write_text("theory Baz imports Main begin\nend\n")
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.delenv("ISABELLE_MCP_ALLOWED_DIRS", raising=False)
+    with pytest.raises(ToolError):
+        read_theory_file(str(thy))  # untrusted: outside cwd
+    assert "theory Baz" in read_theory_file(str(thy), trusted=True)

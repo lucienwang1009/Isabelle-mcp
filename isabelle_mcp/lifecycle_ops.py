@@ -18,8 +18,7 @@ from isabelle_mcp import parsing
 from isabelle_mcp.errors import ToolError, clamp_timeout, map_ir_error
 from isabelle_mcp.ir_client import IRSession, proof_closed
 from isabelle_mcp.project_build import check_isabelle_project, discover_project_root
-from isabelle_mcp.sandbox import read_theory_file
-from isabelle_mcp.sandbox import resolve_in_sandbox
+from isabelle_mcp.sandbox import read_theory_file, resolve_target
 from isabelle_mcp.safety import validate_isar_safe
 from isabelle_mcp.textutil import strip_timing, truncate
 from isabelle_mcp.theory_parse import parse_theory_outline
@@ -153,8 +152,9 @@ class FileOpsMixin:
     ) -> dict[str, object]:
         """Load/check a theory file by header, or build its project context."""
         timeout_seconds = clamp_timeout(timeout_seconds)
-        text = read_theory_file(path)
-        resolved = resolve_in_sandbox(path)
+        # An explicitly named .thy is a trusted target (see resolve_target).
+        text = read_theory_file(path, trusted=True)
+        resolved = resolve_target(path)
         outline = parse_theory_outline(text)
         theory = str(outline.get("name") or "")
         if not theory:
@@ -200,10 +200,11 @@ class FileOpsMixin:
     ) -> dict[str, object]:
         """Run ``isabelle build`` for a project/session and return diagnostics."""
         timeout_seconds = clamp_timeout(timeout_seconds)
-        root_path = resolve_in_sandbox(root)
+        # The project root and -d dirs are explicit build targets (trusted).
+        root_path = resolve_target(root)
         if root_path.is_file():
             root_path = discover_project_root(root_path)
-        dirs = [resolve_in_sandbox(path) for path in (session_dirs or [])]
+        dirs = [resolve_target(path) for path in (session_dirs or [])]
         return check_isabelle_project(
             isabelle_bin=self._isabelle_bin,
             root=Path(root_path),
