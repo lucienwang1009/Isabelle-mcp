@@ -28,3 +28,4 @@ heaps/
 *.log
 .claude/
 .serena/
+.codex/

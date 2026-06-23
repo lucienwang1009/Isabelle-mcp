@@ -1,3 +1,4 @@
 [submodule "vendor/AutoCorrode"]
 	path = vendor/AutoCorrode
 	url = https://github.com/awslabs/AutoCorrode.git
+	ignore = dirty
