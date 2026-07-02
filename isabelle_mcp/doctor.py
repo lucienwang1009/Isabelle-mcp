@@ -170,17 +170,24 @@ def _check_session_built(isabelle_bin: str, session: str) -> Check:
 def _check_ir_port() -> Check:
     raw = os.environ.get("ISABELLE_MCP_PORT")
     try:
-        port = int(raw) if raw else _DEFAULT_IR_PORT
+        explicit = raw not in {None, "", "0"}
+        port = int(raw) if explicit else _DEFAULT_IR_PORT
     except ValueError:
         return Check("I/R TCP port", "fail", f"invalid ISABELLE_MCP_PORT={raw!r}")
 
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            if explicit:
+                return Check(
+                    "I/R TCP port",
+                    "fail",
+                    f"configured port 127.0.0.1:{port} is already accepting connections",
+                    "free it or set ISABELLE_MCP_PORT to another port",
+                )
             return Check(
                 "I/R TCP port",
-                "warn",
-                f"127.0.0.1:{port} is already accepting connections",
-                "choose another ISABELLE_MCP_PORT if startup fails",
+                "ok",
+                f"default port 127.0.0.1:{port} is busy; startup will fall back",
             )
     except OSError:
         return Check("I/R TCP port", "ok", f"127.0.0.1:{port} appears available")

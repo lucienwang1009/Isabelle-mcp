@@ -48,8 +48,8 @@ goal with `by <tactic>` / `by (<tactic>)`. Race candidates with
 ## Picking a tactic fast
 
 1. `isabelle_try0` — it already sweeps simp/auto/blast/fastforce/force/metis.
-2. If `try0` fails, `isabelle_multi_attempt(tactics=["auto","blast","force",
-   "fastforce","arith","algebra"])` to see what bites.
+2. If `try0` fails, `isabelle_multi_attempt(tactics=["by auto","by blast",
+   "by force","by fastforce","by arith","by algebra"])` to see what bites.
 3. Still open → `isabelle_find_theorems` for a missing lemma, then
    `by (simp add: <lemma>)` or `by (metis <lemma>)`.
 4. Still open → `isabelle_sledgehammer`.

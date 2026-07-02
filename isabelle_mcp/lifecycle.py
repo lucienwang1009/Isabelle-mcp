@@ -124,13 +124,21 @@ class IRManager(AutomationMixin, FileOpsMixin):
             handle, self._handle = self._handle, None
             self._registry.clear()
             self._last_access.clear()
+            old_session_name = self._session_name
+            old_session_dir = self._session_dir
             self._session_name = session
             self._session_dir = session_dir
             self._pending_server_event = "ir_session_changed"
         if handle is not None:
             logger.info("switching I/R session to %s (dir=%s)", session, session_dir)
             handle.terminate()
-        self.start()
+        try:
+            self.start()
+        except Exception:
+            with self._lock:
+                self._session_name = old_session_name
+                self._session_dir = old_session_dir
+            raise
 
     def close(self) -> None:
         """Terminate the daemon, stop the reaper, and drop the registry."""

@@ -45,6 +45,13 @@ def test_resolve_port_falls_back_when_default_busy(
     assert _resolve_port(None) == 54321
 
 
+def test_resolve_port_treats_zero_as_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ir_daemon, "_port_in_use", lambda _p: False)
+    assert _resolve_port(0) == _DEFAULT_PORT
+
+
 def test_resolve_port_explicit_busy_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ir_daemon, "_port_in_use", lambda _p: True)
     with pytest.raises(RuntimeError) as exc:

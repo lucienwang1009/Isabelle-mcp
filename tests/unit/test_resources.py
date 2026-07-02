@@ -11,6 +11,7 @@ from isabelle_mcp.server import build_server
 _REFERENCES_DIR = Path(__file__).resolve().parents[2] / "isabelle_mcp" / "skills" / "references"
 
 _EXPECTED_URIS = {
+    "skill://isabelle/project-workflow",
     "skill://isabelle/tactics",
     "skill://isabelle/isar-patterns",
     "skill://isabelle/sledgehammer",
@@ -49,6 +50,15 @@ def test_afp_setup_resource_documents_build_workflow() -> None:
     body = list(contents)[0].content
     assert "isabelle build -b" in body  # heap build command
     assert "ISABELLE_MCP_SESSION" in body  # how to point the server at it
+
+
+def test_project_workflow_resource_documents_root_sessions() -> None:
+    mcp = build_server()
+    contents = asyncio.run(mcp.read_resource("skill://isabelle/project-workflow"))
+    body = list(contents)[0].content
+    assert "ROOT" in body
+    assert "isabelle_check_project" in body
+    assert "session_dirs" in body
 
 
 def test_register_resources_counts_files() -> None:

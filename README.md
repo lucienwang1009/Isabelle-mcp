@@ -96,6 +96,7 @@ disclosure, modelled on [lean4-skills](https://github.com/cameronfreer/lean4-ski
 
 | Resource URI | Topic |
 |---|---|
+| `skill://isabelle/project-workflow` | ROOT/session project workflow for large proofs |
 | `skill://isabelle/tactics` | Tactic catalog + when to use each |
 | `skill://isabelle/isar-patterns` | Structured Isar: induction, cases, calc, obtain |
 | `skill://isabelle/sledgehammer` | Driving sledgehammer + applying its output |

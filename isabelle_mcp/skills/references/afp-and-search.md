@@ -110,9 +110,12 @@ finding a candidate, load/build the relevant session and confirm with
 the **current session image**. The default session is `HOL`, which does **not**
 include the AFP. To search/cite AFP lemmas:
 
-- Set `ISABELLE_MCP_SESSION` to a session image that imports the entry you need
-  (the image must be built first with `isabelle build`), **or**
-- open the REPL on a session that already depends on the AFP entry.
+- In a ROOT project, make the project session depend on the AFP entry, run
+  `isabelle_check_project(root=..., session=...)`, then open the REPL with
+  `session=...` and `session_dirs=[...]`.
+- For a server-wide default, set `ISABELLE_MCP_SESSION` to a session image that
+  imports the entry you need. The image must be built first with
+  `isabelle build`.
 
 For the full download → build → `ISABELLE_MCP_SESSION` workflow (and the
 discovery-vs-availability distinction), see `skill://isabelle/afp-setup`. Until a

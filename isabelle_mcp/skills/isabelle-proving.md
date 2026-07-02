@@ -1,57 +1,97 @@
 ---
 name: isabelle-proving
 description: >-
-  Autonomous Isabelle/HOL theorem-proving loop for general LLMs driving the
-  isabelle-mcp server: open a stateful REPL, state goals, search lemmas
-  (find_theorems / sledgehammer / the AFP), drive Isar proofs one step at a
-  time, falsify with nitpick/quickcheck, and close goals with the tactic
-  cascade. Use whenever editing or extending `.thy` theories or making proofs
-  go through. Not for Lean, Coq/Rocq, Agda, or other provers.
+  Project-scale Isabelle/HOL proof workflow for general LLMs using
+  isabelle-mcp: inspect ROOT/session projects, build/check sessions, open the
+  right theory, decompose large theorems into lemmas, drive stateful REPL proofs
+  one Isar command at a time, search existing facts, falsify bad conjectures,
+  write proofs back to `.thy` files, and finish with strict project checks. Use
+  whenever editing or extending Isabelle `.thy` theories, proving a large
+  theorem, debugging a failed proof, or working with custom ROOT sessions. Not
+  for Lean, Coq/Rocq, Agda, or other provers.
 ---
 
 # Proving with isabelle-mcp
 
-The server wraps a **stateful, branchable Isabelle/HOL REPL**. You build a proof
-incrementally: each `isabelle_step` runs one Isar command and the returned proof
-state is your feedback signal. Treat the type checker as your test suite — a goal
-is proved only when Isabelle accepts it with no `sorry`/`oops`.
+Default to a **project-first proof workflow**, not a tool-tour. The MCP server
+wraps a stateful, branchable Isabelle/HOL REPL, but the source `.thy` file and
+`isabelle_check_project` are the source of truth. Use the REPL to explore and
+stabilize proofs, then write them back and run a strict build.
 
-## Core principles
+## Operating Procedure
 
-1. **Search before you prove.** Most facts already exist in the library. Run
-   `isabelle_find_theorems` and `isabelle_sledgehammer` before hand-writing a
-   proof. For results outside `HOL`, consult the **AFP** (see the
-   `skill://isabelle/afp-and-search` resource).
-2. **Build incrementally.** One Isar command per `isabelle_step` — a step that
-   bundles several commands rolls back as a unit on failure, losing the locus.
-   Read the proof state after every step; never paste a whole script blind. To
-   sketch a long structured proof you may `declare [[quick_and_dirty]]` once and
-   use `sorry` as scaffolding, but remove every `sorry`/`oops` before
-   `isabelle_check_project` (the build stays strict).
-3. **Falsify before sinking time in.** Run `isabelle_nitpick` /
-   `isabelle_quickcheck` on a doubtful goal first — a counterexample means the
-   statement is wrong; fix the statement, don't fight the proof.
-4. **Respect the statement.** Never weaken or rephrase the theorem to make it
-   pass, and never fake success with `sorry`, `oops`, or `sorry`-backed lemmas.
-   If a goal is genuinely false or needs an extra hypothesis, say so.
-5. **Prefer structured Isar** for anything non-trivial. A `proof … qed` with
-   named intermediate facts is more robust and readable than a long `apply`
-   chain. See `skill://isabelle/isar-patterns`.
+Follow this workflow for any non-trivial theorem.
 
-## The loop
+1. **Locate the project context.**
+   Inspect the relevant `.thy` file and nearby `ROOT`. If a custom session is
+   present, do not work in scratch `Main`; use that session.
 
-1. **Open a REPL**: `isabelle_open_repl(theory="Main")` → opaque `repl_id`. Pass
-   it to every later call. Import a richer session (e.g. `"Complex_Main"`) when
-   you need more theories.
-2. **State the goal**: `isabelle_step(repl_id, isar='theorem t: "P x"')`. The
-   response shows the proof state and `at_end_of_proof`.
+2. **Build or check the session first.**
+   For a ROOT project, run `isabelle_check_project(root=..., session=...)`
+   before opening a REPL. A session is not automatically rebuilt when theory
+   files or ROOT files change.
+
+3. **Open the right theory in the right session.**
+   Use `isabelle_open_repl(theory=..., session=..., session_dirs=[...])` for
+   custom projects. Use `theory="Main"` only for isolated HOL experiments.
+
+4. **Validate the statement before investing.**
+   If the theorem is a conjecture or has complex assumptions, run
+   `isabelle_quickcheck` and/or `isabelle_nitpick` early. A counterexample means
+   the statement needs attention; do not force a false theorem through.
+
+5. **Decompose the large theorem.**
+   Identify missing intermediate facts, induction invariants, case splits, and
+   algebraic or set-theoretic cleanup lemmas. Prove these as named lemmas in the
+   source file. Large proofs should become a sequence of small checked facts,
+   not one opaque automation call.
+
+6. **Prove each subgoal incrementally.**
+   Send exactly one Isar command per `isabelle_step`. Read the resulting state
+   after each step. Use `isabelle_fork_repl` to try risky branches, and
+   `isabelle_undo` to back out locally.
+
+7. **Search before hand-writing proof machinery.**
+   Use `isabelle_find_theorems` in the loaded session. If the fact is likely
+   outside the session, use `isabelle_afp_status` / `isabelle_afp_search` for
+   discovery, then make sure the needed session is actually built and loaded.
+
+8. **Use automation as a tactic, not a plan.**
+   On each stuck goal, try `isabelle_try0`, then targeted theorem search, then
+   `isabelle_multi_attempt`, then `isabelle_sledgehammer`. If automation does
+   not close the goal, write structured Isar and recurse on the new subgoals.
+
+9. **Write back and rebuild.**
+   Once a REPL proof works, edit the `.thy` file, remove all scaffolding, then
+   run `isabelle_check_file` and finally `isabelle_check_project`. The task is
+   not done until the project build accepts the source.
+
+## Core Principles
+
+1. **The source file and project build are authoritative.** REPL success is
+   useful exploration; `isabelle_check_project` is the final gate.
+2. **One command at a time.** A step that bundles several Isar commands rolls
+   back as a unit on failure, losing the useful prefix.
+3. **Respect the statement.** Never weaken a theorem, add hidden assumptions,
+   or rely on `sorry`/`oops` to claim success.
+4. **Prefer structured Isar for large proofs.** Use `proof ... qed`, named
+   intermediate facts, induction, cases, `obtain`, and `calc` rather than long
+   brittle apply scripts. See `skill://isabelle/isar-patterns`.
+5. **Search before inventing.** Most facts already exist in the loaded session,
+   HOL libraries, or AFP. Use the search tools before hand-writing library
+   lemmas.
+
+## REPL Loop
+
+1. **Open a REPL**: for scratch use `isabelle_open_repl(theory="Main")`; for a
+   project use `theory` + `session` + `session_dirs`. The result is an opaque
+   `repl_id`; pass it to every later call.
+2. **State the goal**: `isabelle_step(repl_id, isar='theorem t: "P x"')`.
 3. **Drive the proof**: one `isabelle_step` per Isar command (`by simp`,
-   `apply auto`, `proof - … qed`, `next`, `qed`).
-4. **Inspect**: `isabelle_state(repl_id)` returns history + open goals at any
-   time. A step returning `at_end_of_proof: true` means the goal is closed.
-5. **Backtrack**: `isabelle_undo(repl_id, n=1)` drops the last step(s);
-   `isabelle_fork_repl(repl_id)` branches so you can try an alternative without
-   losing the current line.
+   `apply auto`, `proof -`, `next`, `qed`).
+4. **Inspect**: `isabelle_state(repl_id)` returns history and open goals.
+5. **Branch or backtrack**: `isabelle_fork_repl(repl_id)` for alternatives;
+   `isabelle_undo(repl_id, n=1)` for local rollback.
 6. **Clean up**: `isabelle_close_repl(repl_id)` when finished.
 
 ## Tool reference
@@ -101,7 +141,7 @@ Raw tactic preference inside a step (rough order of cost):
 `arith`/`presburger`/`linarith` → `algebra` → `metis`/`meson`. Full catalog with
 when-to-use in `skill://isabelle/tactics`.
 
-`isabelle_multi_attempt(repl_id, tactics=["simp","auto","blast","force"])` races
+`isabelle_multi_attempt(repl_id, tactics=["by simp","by auto","by blast"])` races
 these at once and reports which close the goal without mutating your REPL — a
 fast way to pick a tactic.
 
@@ -129,6 +169,7 @@ A proof is done when:
 
 | Resource | Read when |
 |---|---|
+| `skill://isabelle/project-workflow` | Working in a ROOT/session project, proving a large theorem, coordinating multi-agent proof work. |
 | `skill://isabelle/tactics` | Choosing/ordering tactics; what each one does. |
 | `skill://isabelle/isar-patterns` | Writing structured proofs: induction, cases, calc, obtain. |
 | `skill://isabelle/sledgehammer` | Driving sledgehammer well and applying its output. |

@@ -336,3 +336,35 @@ def test_ensure_session_noop_when_unchanged(
     assert relaunched == []  # same session -> no relaunch
     mgr.ensure_session("Other", None)
     assert relaunched == [("Other", None)]
+
+
+def test_failed_session_relaunch_restores_previous_session(
+    manager_with_fake: tuple[IRManager, FakeSession],
+) -> None:
+    mgr, _ = manager_with_fake
+    terminated: list[bool] = []
+
+    class _Proc:
+        def poll(self) -> None:
+            return None
+
+    class _Handle:
+        process = _Proc()
+
+        def terminate(self) -> None:
+            terminated.append(True)
+
+    def failing_start() -> None:
+        raise RuntimeError("bad session image")
+
+    mgr._handle = _Handle()  # type: ignore[assignment]
+    mgr._session_name = "HOL"
+    mgr._session_dir = None
+    mgr.start = failing_start  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="bad session image"):
+        mgr.ensure_session("Broken", Path("/tmp/broken-root"))
+
+    assert terminated == [True]
+    assert mgr._session_name == "HOL"
+    assert mgr._session_dir is None

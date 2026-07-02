@@ -79,14 +79,29 @@ isabelle build -b -v -d ~/my-afp isabelle-mcp-afp
 
 ## 4. Point the MCP server at the built heap
 
+For a project-local proof, prefer opening the REPL with explicit session data:
+
+```text
+isabelle_check_project(root="/path/to/project", session="My_Session")
+isabelle_open_repl(
+  theory="My_Work",
+  session="My_Session",
+  session_dirs=["/path/to/project"]
+)
+```
+
+For a server-wide default session, set the environment before starting the MCP
+server:
+
 ```bash
 export ISABELLE_MCP_SESSION=Cook_Levin          # or: isabelle-mcp-afp
 uv run isabelle-mcp
 ```
 
 Now `isabelle_open_repl` starts in that image, and `isabelle_find_theorems` /
-`isabelle_sledgehammer` can see and cite its lemmas. Confirm scope with
-`isabelle_session_info` (when available) before relying on a lemma being present.
+`isabelle_sledgehammer` can see and cite its lemmas. Confirm scope by opening a
+REPL in the target theory and running `isabelle_find_theorems` for a known lemma
+from that session before relying on it.
 
 ## 5. Docker: pre-bake instead of build-at-runtime
 

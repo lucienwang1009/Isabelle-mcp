@@ -24,6 +24,7 @@ _URI_PREFIX = "skill://isabelle/"
 
 # Stem -> human-readable title shown in the resource listing.
 REFERENCE_TITLES: dict[str, str] = {
+    "project-workflow": "ROOT/session project workflow for large proofs",
     "tactics": "Isabelle/HOL tactic reference",
     "isar-patterns": "Structured Isar proof patterns",
     "sledgehammer": "Driving sledgehammer",

@@ -7,6 +7,7 @@ The request/response protocol lives in :mod:`isabelle_mcp.ir_client`.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import logging
 import os
@@ -17,7 +18,13 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +33,9 @@ __all__ = ["IRDaemonHandle", "launch_ir_daemon"]
 # `IR_Repl.token: <token>` printed by repl.py:2456 (no ANSI codes).
 _TOKEN_RE = re.compile(r"^IR_Repl\.token:\s*(\S+)\s*$")
 
-# Default port we pin via `--port 9147` to avoid dynamic-port discovery
-# (the announcement line includes ANSI escapes — see docs/ir-protocol-notes.md).
+# Default port we try first for stable local debugging. Multi-process MCP
+# startup is serialized by `_port_launch_lock`, so fallback selection is not
+# racing other isabelle-mcp instances.
 _DEFAULT_PORT = 9147
 
 
@@ -85,10 +93,12 @@ def _resolve_port(port: int | None) -> int:
 
     If ``port`` is given explicitly (``ISABELLE_MCP_PORT``) and it is busy, we
     fail loudly with the remedy. If we are on the default port and it is busy
-    (the common stale-daemon case), we transparently fall back to a free port —
-    we pass it via ``--port`` so we still know it without parsing stdout.
+    (a stale daemon, or another concurrently-started MCP server), we
+    transparently fall back to a free port. This runs under `_port_launch_lock`
+    during real startup, so the free-port check remains valid until repl.py has
+    bound the listener.
     """
-    explicit = port is not None
+    explicit = port is not None and port != 0
     chosen = port if explicit else _DEFAULT_PORT
     if not _port_in_use(chosen):
         return chosen
@@ -105,6 +115,29 @@ def _resolve_port(port: int | None) -> int:
         free,
     )
     return free
+
+
+def _port_lock_path() -> Path:
+    raw = os.environ.get("ISABELLE_MCP_PORT_LOCK")
+    if raw:
+        return Path(raw).expanduser()
+    return Path.home() / ".cache" / "isabelle-mcp" / "ir-port.lock"
+
+
+@contextlib.contextmanager
+def _port_launch_lock() -> Iterator[None]:
+    """Serialize local port selection across concurrently-started MCP servers."""
+    lock_path = _port_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        if fcntl is None:
+            yield
+            return
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _wait_for_listener(port: int, timeout_seconds: float) -> None:
@@ -172,7 +205,6 @@ def _read_token_from_stdout(
             f"I/R did not print `IR_Repl.token: ...` within {timeout_seconds:.1f}s. "
             f"Captured stdout: {''.join(captured_lines)!r}"
         )
-
     # Spawn a background thread to keep draining stdout, otherwise the daemon
     # will eventually block on a full pipe.
     def _drain() -> None:
@@ -229,65 +261,67 @@ def launch_ir_daemon(
     if not repl_script.is_file():
         raise FileNotFoundError(f"missing I/R entry point: {repl_script}")
 
-    chosen_port = _resolve_port(port)
-
     env = os.environ.copy()
 
-    cmd: list[str] = [
-        sys.executable,
-        str(repl_script),
-        "--isabelle",
-        isabelle_bin,
-        "--session",
-        session,
-        "--port",
-        str(chosen_port),
-        "--server-only",
-    ]
-    if session_dir is not None:
-        cmd.extend(["--dir", str(session_dir)])
-    if not bash_server:
-        cmd.append("--no-bash-server")
+    with _port_launch_lock():
+        chosen_port = _resolve_port(port)
 
-    logger.info("launching I/R: %s", " ".join(cmd))
-    process = subprocess.Popen(
-        cmd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,  # line-buffered, important for readline() loop
-        cwd=str(ir_dir),
-    )
+        cmd: list[str] = [
+            sys.executable,
+            "-u",
+            str(repl_script),
+            "--isabelle",
+            isabelle_bin,
+            "--session",
+            session,
+            "--port",
+            str(chosen_port),
+            "--server-only",
+        ]
+        if session_dir is not None:
+            cmd.extend(["--dir", str(session_dir)])
+        if not bash_server:
+            cmd.append("--no-bash-server")
 
-    drain_thread: threading.Thread | None = None
-    try:
-        token, drain_thread = _read_token_from_stdout(process, startup_timeout_seconds)
-        _wait_for_listener(chosen_port, startup_timeout_seconds)
-    except Exception:
-        # Terminate first so all pipes drain to EOF, then collect output.
+        logger.info("launching I/R: %s", " ".join(cmd))
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # line-buffered, important for readline() loop
+            cwd=str(ir_dir),
+        )
+
+        drain_thread: threading.Thread | None = None
         try:
-            process.terminate()
-        except OSError:
-            pass
-        # Let the drain thread observe EOF and exit gracefully.
-        if drain_thread is not None:
-            drain_thread.join(timeout=5.0)
-        # Drain remaining stderr only — stdout was owned by drain_thread.
-        stderr_data = ""
-        try:
-            if process.stderr is not None:
-                stderr_data = process.stderr.read() or ""
+            token, drain_thread = _read_token_from_stdout(process, startup_timeout_seconds)
+            _wait_for_listener(chosen_port, startup_timeout_seconds)
         except Exception:
-            pass
-        if process.poll() is None:
+            # Terminate first so all pipes drain to EOF, then collect output.
             try:
-                process.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=3.0)
-        logger.error("I/R startup failed.\nstderr:\n%s", stderr_data)
-        raise
+                process.terminate()
+            except OSError:
+                pass
+            # Let the drain thread observe EOF and exit gracefully.
+            if drain_thread is not None:
+                drain_thread.join(timeout=5.0)
+            # Drain remaining stderr only — stdout was owned by drain_thread.
+            stderr_data = ""
+            try:
+                if process.stderr is not None:
+                    stderr_data = process.stderr.read() or ""
+            except Exception:
+                pass
+            if process.poll() is None:
+                try:
+                    process.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3.0)
+            logger.error("I/R startup failed.\nstderr:\n%s", stderr_data)
+            raise
 
     stderr_drain_thread = _drain_stderr(process)
 
